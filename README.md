@@ -10,6 +10,14 @@ cryptography, and the command-line client deliberately live in their own reposit
 - [`storage-cli`](https://github.com/TeleCrypt-io/storage-cli) owns the CLI migration source.
 - This repository owns only the static website, its UI tests, and its GitHub Pages deployment.
 
+## Shared UI vendor baseline
+
+`src/vendor/telecrypt-ui/product.css` is an exact local vendor copy of the
+canonical shared UI stylesheet. `src/theme.css` imports it directly, keeping
+this repository self-contained without a runtime package dependency. The
+vendor `PROVENANCE.json` records the exact `TeleCrypt-io/ui` release and commit,
+Storage baseline, and content hash.
+
 ## Development and checks
 
 ```

@@ -455,33 +455,35 @@ export function FolderContents({
                     )}
                   </td>
                   <td className="col-actions">
-                    <button
-                      type="button"
-                      className="btn btn-sm row-action"
-                      disabled={busy}
-                      onClick={() => onOpenSubfolder(sub)}
-                      data-testid="open-subfolder"
-                    >
-                      Open
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm row-action"
-                      disabled={busy}
-                      onClick={() => setRenaming({ kind: "folder", id: sub.id, name: sub.name })}
-                      data-testid="rename-subfolder"
-                    >
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm row-action btn-danger"
-                      disabled={busy}
-                      onClick={() => void handleDeleteSubfolder(sub.id)}
-                      data-testid="delete-subfolder"
-                    >
-                      Delete
-                    </button>
+                    <div className="table-actions">
+                      <button
+                        type="button"
+                        className="btn btn-sm row-action"
+                        disabled={busy}
+                        onClick={() => onOpenSubfolder(sub)}
+                        data-testid="open-subfolder"
+                      >
+                        Open
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm row-action"
+                        disabled={busy}
+                        onClick={() => setRenaming({ kind: "folder", id: sub.id, name: sub.name })}
+                        data-testid="rename-subfolder"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm row-action btn-danger"
+                        disabled={busy}
+                        onClick={() => void handleDeleteSubfolder(sub.id)}
+                        data-testid="delete-subfolder"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -517,42 +519,44 @@ export function FolderContents({
                     )}
                   </td>
                   <td className="col-actions">
-                    <button
-                      type="button"
-                      className="btn btn-sm row-action"
-                      disabled={busy}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handleDownload(f);
-                      }}
-                      data-testid="download-file"
-                    >
-                      Download
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm row-action"
-                      disabled={busy}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRenaming({ kind: "file", id: f.id, name: f.name });
-                      }}
-                      data-testid="rename-file"
-                    >
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm row-action btn-danger"
-                      disabled={busy}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handleDeleteFile(f.id);
-                      }}
-                      data-testid="delete-file"
-                    >
-                      Delete
-                    </button>
+                    <div className="table-actions">
+                      <button
+                        type="button"
+                        className="btn btn-sm row-action"
+                        disabled={busy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDownload(f);
+                        }}
+                        data-testid="download-file"
+                      >
+                        Download
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm row-action"
+                        disabled={busy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRenaming({ kind: "file", id: f.id, name: f.name });
+                        }}
+                        data-testid="rename-file"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm row-action btn-danger"
+                        disabled={busy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDeleteFile(f.id);
+                        }}
+                        data-testid="delete-file"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
