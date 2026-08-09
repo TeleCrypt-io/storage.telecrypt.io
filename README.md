@@ -14,10 +14,9 @@ cryptography, and the command-line client deliberately live in their own reposit
 
 `src/vendor/telecrypt-ui/product.css` is an exact local vendor copy of the
 canonical shared UI stylesheet. `src/theme.css` imports it directly, keeping
-this repository self-contained until an official UI package is released. The
-vendor `PROVENANCE.json` records its exact Storage baseline and content hash;
-release preparation must replace its canonical-commit placeholder with the
-reviewed local shared-UI commit.
+this repository self-contained without a runtime package dependency. The
+vendor `PROVENANCE.json` records the exact `TeleCrypt-io/ui` release and commit,
+Storage baseline, and content hash.
 
 ## Development and checks
 
