@@ -9,17 +9,17 @@ export interface Session {
   userId: string;
   deviceId: string;
   accessToken: string;
-  /**
-   * Present only when logged in via OIDC/MAS (authorization-code + PKCE;
-   * see src/lib/oidcAuth.ts). Absent for a
-   * plain password login.
-   */
-  refreshToken?: string;
-  oidcIssuer?: string;
-  oidcClientId?: string;
+  /** OIDC/MAS authorization-code + PKCE session fields. */
+  refreshToken: string;
+  oidcIssuer: string;
+  oidcClientId: string;
 }
 
 const STORAGE_KEY = "telecrypt-io-ui:session";
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
 
 export function loadSession(): Session | null {
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -27,15 +27,20 @@ export function loadSession(): Session | null {
   try {
     const parsed = JSON.parse(raw) as Partial<Session>;
     if (
-      typeof parsed.homeserver === "string" &&
-      typeof parsed.userId === "string" &&
-      typeof parsed.deviceId === "string" &&
-      typeof parsed.accessToken === "string"
+      isNonEmptyString(parsed.homeserver) &&
+      isNonEmptyString(parsed.userId) &&
+      isNonEmptyString(parsed.deviceId) &&
+      isNonEmptyString(parsed.accessToken) &&
+      isNonEmptyString(parsed.refreshToken) &&
+      isNonEmptyString(parsed.oidcIssuer) &&
+      isNonEmptyString(parsed.oidcClientId)
     ) {
       return parsed as Session;
     }
+    localStorage.removeItem(STORAGE_KEY);
     return null;
   } catch {
+    localStorage.removeItem(STORAGE_KEY);
     return null;
   }
 }

@@ -1,7 +1,7 @@
 # storage.telecrypt.io
 
 The static React/Vite site served at [storage.telecrypt.io](https://storage.telecrypt.io).
-It uses the exact published `@telecrypt-io/storage@0.2.0` browser library; storage protocol,
+It uses the exact published `@telecrypt-io/storage@0.2.1` browser library; storage protocol,
 cryptography, and the command-line client deliberately live in their own repositories.
 
 ## Source boundaries
@@ -9,6 +9,14 @@ cryptography, and the command-line client deliberately live in their own reposit
 - [`storage-sdk`](https://github.com/TeleCrypt-io/storage-sdk) owns the library source and future package releases.
 - [`storage-cli`](https://github.com/TeleCrypt-io/storage-cli) owns the CLI migration source.
 - This repository owns only the static website, its UI tests, and its GitHub Pages deployment.
+
+## Security boundaries
+
+The web client uses MAS/OIDC authorization-code + PKCE only; it never collects or sends a Matrix
+compatibility-login password. GitHub Pages cannot set response headers, so `index.html` provides an
+early CSP meta policy as a baseline. A header CSP remains required when the static site moves behind
+a header-capable edge. Vite relaxes only `connect-src` for its development server so the disposable
+localhost MAS/Synapse fixture remains usable; production builds retain the checked-in policy.
 
 ## Shared UI vendor baseline
 

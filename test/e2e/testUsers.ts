@@ -9,7 +9,11 @@
  * so plain `POST /_matrix/client/v3/register` is refused ("Registration has
  * been disabled") — account creation goes through `mas-cli manage
  * register-user` (shelled out via `podman exec`, same as the root harness).
- * Password login below is unchanged.
+ *
+ * The one compatibility-password request below is isolated provisioning
+ * readiness machinery: MAS creates Synapse's corresponding user
+ * asynchronously, and this disposable stack offers no simpler supported
+ * readiness probe. It is never used to exercise Storage UI authentication.
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -54,11 +58,12 @@ async function registerUserInMas(username: string, password: string): Promise<vo
  * MAS provisions the corresponding Synapse-side user account
  * *asynchronously* (a background job) after `mas-cli manage register-user`
  * returns — see the matching, fuller comment in test/harness/users.ts. A
- * login attempted before that job runs can transiently 500; retrying
- * specifically on 500 polls the real condition rather than guessing a fixed
- * delay. Any other status fails fast, not retried.
+ * compatibility-password login attempted before that job runs can transiently
+ * 500; retrying specifically on 500 polls the real condition rather than
+ * guessing a fixed delay. This isolated request is not an application-login
+ * test. Any other status fails fast, not retried.
  */
-async function loginWithRetry(
+async function waitForSynapseProvisioning(
   username: string,
   password: string,
   attempts = 20,
@@ -83,7 +88,7 @@ async function loginWithRetry(
     }
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
-  throw new Error("loginWithRetry: exhausted attempts");
+  throw new Error("waitForSynapseProvisioning: exhausted attempts");
 }
 
 export async function registerE2eUser(prefix: string): Promise<E2eUser> {
@@ -94,7 +99,7 @@ export async function registerE2eUser(prefix: string): Promise<E2eUser> {
   const password = `pwd_${suffix}`;
 
   await registerUserInMas(localpart, password);
-  const data = await loginWithRetry(localpart, password);
+  const data = await waitForSynapseProvisioning(localpart, password);
   return { userId: data.user_id, localpart, password };
 }
 
@@ -102,8 +107,8 @@ export async function registerE2eUser(prefix: string): Promise<E2eUser> {
  * `minCount` stored keys — the authoritative proof the background backup
  * engine actually finished uploading (mirrors test/functional/keys.test.ts's
  * waitForServerBackupCount). Needs a device access token, which the UI
- * doesn't expose in the DOM, so the caller passes one obtained via a raw
- * login call. */
+ * doesn't expose in the DOM, so the caller passes the OIDC access token held
+ * in its own test session. */
 export async function waitForServerBackupCount(
   accessToken: string,
   minCount: number,
@@ -123,27 +128,4 @@ export async function waitForServerBackupCount(
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-}
-
-/** A plain password-login call (not through the UI) — used only to obtain a
- * throwaway access token for server-side assertions like
- * waitForServerBackupCount, never to drive the app itself. */
-export async function passwordLogin(
-  user: Pick<E2eUser, "localpart" | "password">,
-): Promise<{ accessToken: string }> {
-  const res = await fetch("http://localhost:8008/_matrix/client/v3/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      type: "m.login.password",
-      identifier: { type: "m.id.user", user: user.localpart },
-      password: user.password,
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`login failed (${res.status}): ${body}`);
-  }
-  const data = (await res.json()) as { access_token: string };
-  return { accessToken: data.access_token };
 }
