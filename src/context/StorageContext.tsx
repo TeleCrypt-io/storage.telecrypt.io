@@ -7,8 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { TeleCryptIOStorage, discoverOidcIssuer, buildTokenRefreshFunction } from "../lib/core";
-import { beginOidcLogin, completeOidcLoginFromCallback, isOidcCallback } from "../lib/oidcAuth";
+import type { TeleCryptIOStorage } from "../lib/core";
 import { clearSession, loadSession, saveSession, type Session } from "../lib/session";
 import { prefetchCryptoWasm, watchWasmResourceProgress } from "../lib/wasmProgress";
 
@@ -118,12 +117,15 @@ export function StorageProvider({ children }: { children: ReactNode }) {
           let client!: TeleCryptIOStorage;
           try {
             appendLog("Discovering authentication server…");
-            const authMetadata = await discoverOidcIssuer(s.homeserver);
+            // Crypto and the Matrix SDK are intentionally fetched only when a
+            // session is being opened, not on the public sign-in screen.
+            const core = await import("../lib/core");
+            const authMetadata = await core.discoverOidcIssuer(s.homeserver);
             if (authMetadata.issuer !== s.oidcIssuer) {
               throw new Error("Authentication issuer changed; log in again");
             }
             appendLog(`Auth issuer: ${authMetadata.issuer}`);
-            const tokenRefreshFunction = buildTokenRefreshFunction(
+            const tokenRefreshFunction = core.buildTokenRefreshFunction(
               authMetadata.token_endpoint,
               s.oidcClientId,
               async (tokens) => {
@@ -135,7 +137,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
               },
             );
             appendLog("Building encrypted client (OIDC session)…");
-            client = await TeleCryptIOStorage.createFromOidc({
+            client = await core.TeleCryptIOStorage.createFromOidc({
               baseUrl: s.homeserver,
               userId: s.userId,
               accessToken: s.accessToken,
@@ -185,9 +187,11 @@ export function StorageProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (isOidcCallback()) {
+    const callbackParams = new URLSearchParams(window.location.search);
+    if (callbackParams.has("code") && callbackParams.has("state")) {
       beginConnecting("Completing sign-in…");
-      completeOidcLoginFromCallback()
+      void import("../lib/oidcAuth")
+        .then(({ completeOidcLoginFromCallback }) => completeOidcLoginFromCallback())
         .then((s) => {
           appendLog(`Signed in as ${s.userId}`);
           saveSession(s);
@@ -217,6 +221,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
     async (homeserver: string) => {
       beginConnecting("Redirecting to sign-in…");
       try {
+        const { beginOidcLogin } = await import("../lib/oidcAuth");
         await beginOidcLogin(homeserver); // navigates away on success
       } catch (err) {
         const msg = (err as Error).message;
