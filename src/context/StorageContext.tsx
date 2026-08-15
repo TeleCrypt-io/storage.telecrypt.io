@@ -225,7 +225,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
         setStatus("error");
       }
     },
-    [appendLog, appendOrReplaceDownloadLog, beginConnecting],
+    [appendLog, beginConnecting],
   );
 
   const logout = useCallback(() => {
@@ -258,6 +258,8 @@ export function StorageProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// The provider and its paired hook intentionally share this module's private context.
+// oxlint-disable-next-line react/only-export-components
 export function useStorage(): StorageContextValue {
   const ctx = useContext(StorageContext);
   if (!ctx) throw new Error("useStorage() must be used within a StorageProvider");
