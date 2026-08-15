@@ -92,6 +92,10 @@ export function StorageProvider({ children }: { children: ReactNode }) {
       const gen = ++connectGenRef.current;
 
       const run = (async () => {
+        // Keep the latest persisted token set for this client. OAuth providers may rotate the
+        // refresh token on one response and omit it on a later response; falling back to the
+        // session captured at connect() time would then resurrect an invalid, pre-rotation token.
+        let currentSession = s;
         // Keep an existing log (e.g. an OIDC callback already
         // started connecting) instead of wiping it when connect() runs.
         if (connectStartedAtRef.current == null) {
@@ -129,11 +133,13 @@ export function StorageProvider({ children }: { children: ReactNode }) {
               authMetadata.token_endpoint,
               s.oidcClientId,
               async (tokens) => {
-                saveSession({
-                  ...s,
+                currentSession = {
+                  ...currentSession,
                   accessToken: tokens.accessToken,
-                  refreshToken: tokens.refreshToken ?? s.refreshToken,
-                });
+                  refreshToken: tokens.refreshToken ?? currentSession.refreshToken,
+                };
+                saveSession(currentSession);
+                if (gen === connectGenRef.current) setSession(currentSession);
               },
             );
             appendLog("Building encrypted client (OIDC session)…");
@@ -155,7 +161,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
           }
           appendLog("Connected.");
           setStorage(client);
-          setSession(s);
+          setSession(currentSession);
           setStatus("ready");
         } catch (err) {
           if (gen !== connectGenRef.current) return;

@@ -197,6 +197,39 @@ describe("login", () => {
     );
     expect(core.TeleCryptIOStorage.createFromOidc).not.toHaveBeenCalled();
   });
+
+  it("keeps the latest rotated refresh token when a later refresh omits one", async () => {
+    await loginAndReachVaults();
+    const createOptions = vi.mocked(core.TeleCryptIOStorage.createFromOidc).mock.calls[0][0];
+    const refresh = createOptions.tokenRefreshFunction;
+    expect(refresh).toBeDefined();
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ access_token: "access-rotated", refresh_token: "refresh-rotated" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: "access-later" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    const first = await refresh!(SESSION.refreshToken);
+    await refresh!(first.refreshToken!);
+
+    expect(JSON.parse(localStorage.getItem("telecrypt-io-ui:session")!)).toEqual(
+      expect.objectContaining({
+        accessToken: "access-later",
+        refreshToken: "refresh-rotated",
+      }),
+    );
+    fetchMock.mockRestore();
+  });
 });
 
 describe("vaults", () => {
