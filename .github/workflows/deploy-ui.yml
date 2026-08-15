@@ -40,10 +40,13 @@ jobs:
       - name: Install exact dependencies
         run: npm ci
 
-      - name: Verify and build
+      - name: Verify
         run: |
           npm run lint
           npm test
+
+      - name: Build
+        run: |
           npm run build
         env:
           VITE_HOMESERVER: https://backend.telecrypt.io
