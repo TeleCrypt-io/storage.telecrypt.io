@@ -9,7 +9,9 @@
  * so plain `POST /_matrix/client/v3/register` is refused ("Registration has
  * been disabled") — account creation goes through `mas-cli manage
  * register-user` (shelled out via `podman exec`, same as the root harness).
- * Password login below is unchanged.
+ * The browser then authenticates only through MAS OAuth. A narrowly scoped
+ * compatibility login below is fixture-only and discarded: it polls the
+ * asynchronous MAS-to-Synapse provisioning job before browser OAuth starts.
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -51,21 +53,20 @@ async function registerUserInMas(username: string, password: string): Promise<vo
 }
 
 /**
- * MAS provisions the corresponding Synapse-side user account
- * *asynchronously* (a background job) after `mas-cli manage register-user`
- * returns — see the matching, fuller comment in test/harness/users.ts. A
- * login attempted before that job runs can transiently 500; retrying
- * specifically on 500 polls the real condition rather than guessing a fixed
- * delay. Any other status fails fast, not retried.
+ * Fixture-only readiness probe. MAS provisions the Synapse-side account in
+ * a background job after register-user returns, and an immediate OAuth token
+ * exchange can otherwise race that job. The resulting compatibility session
+ * is discarded and never reaches product code; production UI auth remains
+ * exclusively OAuth through MAS.
  */
-async function loginWithRetry(
+async function waitForFixtureProvisioning(
   username: string,
   password: string,
   attempts = 20,
   delayMs = 300,
 ): Promise<{ user_id: string }> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const res = await fetch("http://localhost:8008/_matrix/client/v3/login", {
+    const response = await fetch("http://localhost:8008/_matrix/client/v3/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -74,16 +75,15 @@ async function loginWithRetry(
         password,
       }),
     });
-    if (res.ok) {
-      return (await res.json()) as { user_id: string };
-    }
-    const body = await res.text();
-    if (res.status !== 500 || attempt === attempts) {
-      throw new Error(`login (after MAS registration) failed (${res.status}): ${body}`);
+    if (response.ok) return (await response.json()) as { user_id: string };
+
+    const body = await response.text();
+    if (response.status !== 500 || attempt === attempts) {
+      throw new Error(`fixture provisioning probe failed (${response.status}): ${body}`);
     }
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
-  throw new Error("loginWithRetry: exhausted attempts");
+  throw new Error("waitForFixtureProvisioning: exhausted attempts");
 }
 
 export async function registerE2eUser(prefix: string): Promise<E2eUser> {
@@ -94,16 +94,16 @@ export async function registerE2eUser(prefix: string): Promise<E2eUser> {
   const password = `pwd_${suffix}`;
 
   await registerUserInMas(localpart, password);
-  const data = await loginWithRetry(localpart, password);
-  return { userId: data.user_id, localpart, password };
+  const provisioned = await waitForFixtureProvisioning(localpart, password);
+  return { userId: provisioned.user_id, localpart, password };
 }
 
 /** Polls the raw server-side key backup endpoint until it reports at least
  * `minCount` stored keys — the authoritative proof the background backup
  * engine actually finished uploading (mirrors test/functional/keys.test.ts's
  * waitForServerBackupCount). Needs a device access token, which the UI
- * doesn't expose in the DOM, so the caller passes one obtained via a raw
- * login call. */
+ * doesn't expose in the DOM, so the caller reads its OAuth session from the
+ * test browser's localStorage. */
 export async function waitForServerBackupCount(
   accessToken: string,
   minCount: number,
@@ -123,27 +123,4 @@ export async function waitForServerBackupCount(
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-}
-
-/** A plain password-login call (not through the UI) — used only to obtain a
- * throwaway access token for server-side assertions like
- * waitForServerBackupCount, never to drive the app itself. */
-export async function passwordLogin(
-  user: Pick<E2eUser, "localpart" | "password">,
-): Promise<{ accessToken: string }> {
-  const res = await fetch("http://localhost:8008/_matrix/client/v3/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      type: "m.login.password",
-      identifier: { type: "m.id.user", user: user.localpart },
-      password: user.password,
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`login failed (${res.status}): ${body}`);
-  }
-  const data = (await res.json()) as { access_token: string };
-  return { accessToken: data.access_token };
 }

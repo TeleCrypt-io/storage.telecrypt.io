@@ -100,6 +100,9 @@ export async function completeOidcLoginFromCallback(): Promise<Session> {
   if (!deviceId) {
     throw new Error("completeOidcLoginFromCallback: granted scope did not include a device_id");
   }
+  if (!tokenResponse.refresh_token) {
+    throw new Error("completeOidcLoginFromCallback: authorization server returned no refresh token");
+  }
 
   const who = await whoAmI(homeserverUrl, tokenResponse.access_token);
   if (who.deviceId && who.deviceId !== deviceId) {

@@ -30,6 +30,12 @@ npm run build
 
 Browser acceptance tooling is operator-local Harness work, never a GitHub Actions job.
 
+## Authentication
+
+The web application is OAuth/OIDC-only: it never presents, receives, or stores a Matrix
+password. Local browser E2E tests authenticate through the disposable MAS authorization server,
+then verify restoration from the OAuth session persisted by the application.
+
 ## Releases and deployment
 
 Pushes and pull requests to `main` only verify the source. GitHub Pages deploys only when an

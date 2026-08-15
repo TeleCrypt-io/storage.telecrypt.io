@@ -9,14 +9,10 @@ export interface Session {
   userId: string;
   deviceId: string;
   accessToken: string;
-  /**
-   * Present only when logged in via OIDC/MAS (authorization-code + PKCE;
-   * see src/lib/oidcAuth.ts). Absent for a
-   * plain password login.
-   */
-  refreshToken?: string;
-  oidcIssuer?: string;
-  oidcClientId?: string;
+  /** OAuth/MAS authorization-code + PKCE metadata (see src/lib/oidcAuth.ts). */
+  refreshToken: string;
+  oidcIssuer: string;
+  oidcClientId: string;
 }
 
 const STORAGE_KEY = "telecrypt-io-ui:session";
@@ -30,12 +26,17 @@ export function loadSession(): Session | null {
       typeof parsed.homeserver === "string" &&
       typeof parsed.userId === "string" &&
       typeof parsed.deviceId === "string" &&
-      typeof parsed.accessToken === "string"
+      typeof parsed.accessToken === "string" &&
+      typeof parsed.refreshToken === "string" &&
+      typeof parsed.oidcIssuer === "string" &&
+      typeof parsed.oidcClientId === "string"
     ) {
       return parsed as Session;
     }
+    localStorage.removeItem(STORAGE_KEY);
     return null;
   } catch {
+    localStorage.removeItem(STORAGE_KEY);
     return null;
   }
 }

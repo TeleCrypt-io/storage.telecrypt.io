@@ -3,15 +3,18 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 import * as core from "./lib/core";
-import * as auth from "./lib/auth";
 import { formatElapsed } from "./lib/formatElapsed";
 import { formatOperationError } from "./lib/formatOperationError";
+import * as oidcAuth from "./lib/oidcAuth";
+import { saveSession } from "./lib/session";
 
 vi.mock("./lib/core", async () => {
   const actual = await vi.importActual<typeof import("./lib/core")>("./lib/core");
   return {
     ...actual,
     TeleCryptIOStorage: { create: vi.fn(), createFromOidc: vi.fn() },
+    discoverOidcIssuer: vi.fn(),
+    buildTokenRefreshFunction: vi.fn(),
     listFolders: vi.fn(),
     listPendingInvites: vi.fn(),
     getMyFolderRole: vi.fn(),
@@ -37,16 +40,19 @@ vi.mock("./lib/core", async () => {
   };
 });
 
-vi.mock("./lib/auth", () => ({
-  loginWithPassword: vi.fn(),
-  registerAccount: vi.fn(),
-}));
+vi.mock("./lib/oidcAuth", async () => {
+  const actual = await vi.importActual<typeof import("./lib/oidcAuth")>("./lib/oidcAuth");
+  return { ...actual, beginOidcLogin: vi.fn(), isOidcCallback: vi.fn(() => false) };
+});
 
 const SESSION = {
   homeserver: "http://localhost:8008",
   userId: "@alice:localhost",
   deviceId: "DEVICE1",
   accessToken: "tok-123",
+  refreshToken: "refresh-123",
+  oidcIssuer: "http://localhost:8082",
+  oidcClientId: "telecrypt-ui-client",
 };
 
 function fakeStorage() {
@@ -62,19 +68,18 @@ function fakeStorage() {
 
 async function loginAndReachVaults(initialVaults: Array<{ id: string; name: string }> = []) {
   const storage = fakeStorage();
-  vi.mocked(auth.loginWithPassword).mockResolvedValue(SESSION);
-  vi.mocked(core.TeleCryptIOStorage.create).mockResolvedValue(storage as never);
+  vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
+    issuer: SESSION.oidcIssuer,
+    token_endpoint: `${SESSION.oidcIssuer}/oauth2/token`,
+  } as never);
+  vi.mocked(core.buildTokenRefreshFunction).mockReturnValue(vi.fn());
+  vi.mocked(core.TeleCryptIOStorage.createFromOidc).mockResolvedValue(storage as never);
   vi.mocked(core.listFolders).mockResolvedValue(initialVaults);
   vi.mocked(core.listPendingInvites).mockResolvedValue([]);
 
   const user = userEvent.setup();
+  saveSession(SESSION);
   render(<App />);
-
-  await user.clear(screen.getByTestId("homeserver"));
-  await user.type(screen.getByTestId("homeserver"), SESSION.homeserver);
-  await user.type(screen.getByTestId("username"), "alice");
-  await user.type(screen.getByTestId("password"), "hunter2");
-  await user.click(screen.getByTestId("submit"));
 
   await waitFor(() => expect(screen.getByTestId("current-user")).toHaveTextContent(SESSION.userId));
   if (initialVaults.length === 0) {
@@ -145,36 +150,35 @@ describe("formatOperationError", () => {
   });
 });
 
-describe("login", () => {
-  it("calls loginWithPassword with the entered credentials and lands on the vault list", async () => {
+describe("authentication", () => {
+  it("restores a persisted OAuth session through createFromOidc", async () => {
     await loginAndReachVaults();
-    expect(auth.loginWithPassword).toHaveBeenCalledWith(
-      SESSION.homeserver,
-      "alice",
-      "hunter2",
-    );
-    expect(core.TeleCryptIOStorage.create).toHaveBeenCalledWith(
+    expect(core.TeleCryptIOStorage.createFromOidc).toHaveBeenCalledWith(
       expect.objectContaining({
         baseUrl: SESSION.homeserver,
         userId: SESSION.userId,
         deviceId: SESSION.deviceId,
         accessToken: SESSION.accessToken,
+        refreshToken: SESSION.refreshToken,
       }),
     );
     expect(screen.getByTestId("no-vaults")).toBeInTheDocument();
   });
 
-  it("shows the auth error from a failed login without calling storage.create", async () => {
-    vi.mocked(auth.loginWithPassword).mockRejectedValue(new Error("login failed: 403"));
+  it("offers only OAuth login and reports a pre-redirect OAuth error", async () => {
+    vi.mocked(oidcAuth.beginOidcLogin).mockRejectedValue(new Error("OIDC discovery failed"));
     const user = userEvent.setup();
     render(<App />);
 
-    await user.type(screen.getByTestId("username"), "alice");
-    await user.type(screen.getByTestId("password"), "wrong");
-    await user.click(screen.getByTestId("submit"));
+    expect(screen.queryByTestId("username")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("password")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("submit")).not.toBeInTheDocument();
 
-    expect(await screen.findByTestId("auth-error")).toHaveTextContent("login failed: 403");
-    expect(core.TeleCryptIOStorage.create).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("oidc-login"));
+
+    expect(oidcAuth.beginOidcLogin).toHaveBeenCalledWith(SESSION.homeserver);
+    expect(await screen.findByTestId("auth-error")).toHaveTextContent("OIDC discovery failed");
+    expect(core.TeleCryptIOStorage.createFromOidc).not.toHaveBeenCalled();
   });
 });
 
@@ -230,21 +234,20 @@ describe("vaults", () => {
 
   it("accepts a pending invite via core.joinFolder", async () => {
     const storage = fakeStorage();
-    vi.mocked(auth.loginWithPassword).mockResolvedValue(SESSION);
-    vi.mocked(core.TeleCryptIOStorage.create).mockResolvedValue(storage as never);
+    vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
+      issuer: SESSION.oidcIssuer,
+      token_endpoint: `${SESSION.oidcIssuer}/oauth2/token`,
+    } as never);
+    vi.mocked(core.buildTokenRefreshFunction).mockReturnValue(vi.fn());
+    vi.mocked(core.TeleCryptIOStorage.createFromOidc).mockResolvedValue(storage as never);
     vi.mocked(core.listFolders).mockResolvedValue([]);
     vi.mocked(core.listPendingInvites).mockResolvedValue([
       { id: "!shared:localhost", name: "Shared" },
     ]);
 
     const user = userEvent.setup();
+    saveSession(SESSION);
     render(<App />);
-
-    await user.clear(screen.getByTestId("homeserver"));
-    await user.type(screen.getByTestId("homeserver"), SESSION.homeserver);
-    await user.type(screen.getByTestId("username"), "alice");
-    await user.type(screen.getByTestId("password"), "hunter2");
-    await user.click(screen.getByTestId("submit"));
 
     await waitFor(() => expect(screen.getByTestId("current-user")).toHaveTextContent(SESSION.userId));
     await screen.findByTestId("invite-list");
@@ -257,19 +260,20 @@ describe("vaults", () => {
 
   it("declines a pending invite via core.declineInvite", async () => {
     const storage = fakeStorage();
-    vi.mocked(auth.loginWithPassword).mockResolvedValue(SESSION);
-    vi.mocked(core.TeleCryptIOStorage.create).mockResolvedValue(storage as never);
+    vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
+      issuer: SESSION.oidcIssuer,
+      token_endpoint: `${SESSION.oidcIssuer}/oauth2/token`,
+    } as never);
+    vi.mocked(core.buildTokenRefreshFunction).mockReturnValue(vi.fn());
+    vi.mocked(core.TeleCryptIOStorage.createFromOidc).mockResolvedValue(storage as never);
     vi.mocked(core.listFolders).mockResolvedValue([]);
     vi.mocked(core.listPendingInvites).mockResolvedValue([
       { id: "!shared:localhost", name: "Shared" },
     ]);
 
     const user = userEvent.setup();
+    saveSession(SESSION);
     render(<App />);
-
-    await user.type(screen.getByTestId("username"), "alice");
-    await user.type(screen.getByTestId("password"), "hunter2");
-    await user.click(screen.getByTestId("submit"));
 
     await screen.findByTestId("invite-list");
     await user.click(screen.getByTestId("decline-invite"));

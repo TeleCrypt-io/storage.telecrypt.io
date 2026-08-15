@@ -4,9 +4,23 @@ import type { E2eUser } from "./testUsers";
 
 export async function loginViaUI(page: Page, user: E2eUser): Promise<void> {
   await page.goto("/");
-  await page.getByTestId("username").fill(user.localpart);
-  await page.getByTestId("password").fill(user.password);
-  await page.getByTestId("submit").click();
+  await page.getByTestId("oidc-login").click();
+
+  // The application only initiates OAuth. These fields belong to the MAS
+  // authorization server after the redirect, never to storage.telecrypt.io.
+  await page.waitForURL(/localhost:8082/, { timeout: 20_000 });
+  await page.getByLabel("Username").fill(user.localpart);
+  await page.getByLabel("Password").fill(user.password);
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  // A newly registered dynamic client needs one consent approval; a client
+  // already approved by this browser proceeds directly back to the app.
+  const consentCheckbox = page.locator('input[type="checkbox"]');
+  if (await consentCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await consentCheckbox.check();
+    await page.getByRole("button", { name: "Continue" }).click();
+  }
+
   await expect(page.getByTestId("current-user")).toHaveText(user.userId, { timeout: 20000 });
 }
 
