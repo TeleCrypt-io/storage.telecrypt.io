@@ -5,7 +5,7 @@ import { createFolder, downloadFileBytes, loginViaUI, openFolderByName, uploadFi
 // Mirrors test/functional/keys.test.ts 5.3 ("a genuinely new device recovers
 // files via the Recovery Key") through the UI: set up recovery, capture the
 // shown key, then a FRESH browser context (= fresh IndexedDB crypto store,
-// fresh device_id/access_token via a real password login) restores with
+// fresh device_id/access_token via a real MAS/OIDC login) restores with
 // that key and reads the file. Includes the same negative control: before
 // restoring, the new device must NOT be able to decrypt.
 test("recovery: set up on device A, restore and read a file on a fresh device B", async ({
@@ -44,9 +44,8 @@ test("recovery: set up on device A, restore and read a file on a fresh device B"
     await waitForServerBackupCount(accessToken!, 1, 60_000);
 
     // Device B: a genuinely fresh browser context (empty IndexedDB) logging
-    // in with the SAME account credentials via a real password login — a
-    // brand-new device_id/access_token from Synapse, exactly the "new
-    // laptop" scenario.
+    // in through the same MAS/OIDC flow. That produces a brand-new Matrix
+    // device_id/access_token, exactly the "new laptop" scenario.
     const contextB = await browser.newContext();
     const pageB = await contextB.newPage();
     try {

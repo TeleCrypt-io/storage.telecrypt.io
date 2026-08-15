@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import "./App.css";
 import { StorageProvider, useStorage } from "./context/StorageContext";
 import { LoginScreen } from "./components/LoginScreen";
-import { RecoveryPanel } from "./components/RecoveryPanel";
-import { FileManager } from "./components/FileManager";
 import { formatElapsed } from "./lib/formatElapsed";
+
+const FileManager = lazy(async () => ({ default: (await import("./components/FileManager")).FileManager }));
+const RecoveryPanel = lazy(async () => ({
+  default: (await import("./components/RecoveryPanel")).RecoveryPanel,
+}));
 
 type View = "folders" | "recovery";
 
@@ -105,14 +108,16 @@ function Shell() {
             {error}
           </p>
         )}
-        {view === "recovery" && (
-          <div className="recovery-wrap">
-            <RecoveryPanel />
-          </div>
-        )}
-        {view === "folders" && (
-          <FileManager onOpenRecovery={() => setView("recovery")} />
-        )}
+        <Suspense fallback={<p className="muted">Loading encrypted storage…</p>}>
+          {view === "recovery" && (
+            <div className="recovery-wrap">
+              <RecoveryPanel />
+            </div>
+          )}
+          {view === "folders" && (
+            <FileManager onOpenRecovery={() => setView("recovery")} />
+          )}
+        </Suspense>
       </main>
     </div>
   );

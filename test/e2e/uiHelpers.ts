@@ -2,11 +2,30 @@ import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import type { E2eUser } from "./testUsers";
 
+/** Drives the real browser authorization-code + PKCE flow through the local
+ * disposable MAS. Test credentials are entered only into MAS's page, never
+ * into the Storage application. */
+async function completeMasOidcLogin(page: Page, user: E2eUser): Promise<void> {
+  await page.waitForURL(/localhost:8082/, { timeout: 20_000 });
+  await page.getByLabel("Username").fill(user.localpart);
+  await page.getByLabel("Password").fill(user.password);
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  // Each isolated browser context dynamically registers its own public OIDC
+  // client, so MAS normally asks for consent. Accept it when presented; an
+  // existing authorized client may instead redirect straight back to Storage.
+  const consentCheckbox = page.locator('input[type="checkbox"]');
+  if (await consentCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await consentCheckbox.check();
+    await page.getByRole("button", { name: "Continue" }).click();
+  }
+}
+
+/** Opens Storage and signs in through its real MAS/OIDC browser flow. */
 export async function loginViaUI(page: Page, user: E2eUser): Promise<void> {
   await page.goto("/");
-  await page.getByTestId("username").fill(user.localpart);
-  await page.getByTestId("password").fill(user.password);
-  await page.getByTestId("submit").click();
+  await page.getByTestId("oidc-login").click();
+  await completeMasOidcLogin(page, user);
   await expect(page.getByTestId("current-user")).toHaveText(user.userId, { timeout: 20000 });
 }
 

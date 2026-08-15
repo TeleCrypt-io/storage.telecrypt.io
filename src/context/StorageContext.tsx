@@ -7,9 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { TeleCryptIOStorage, discoverOidcIssuer, buildTokenRefreshFunction } from "../lib/core";
-import { loginWithPassword, registerAccount } from "../lib/auth";
-import { beginOidcLogin, completeOidcLoginFromCallback, isOidcCallback } from "../lib/oidcAuth";
+import type { TeleCryptIOStorage } from "../lib/core";
 import { clearSession, loadSession, saveSession, type Session } from "../lib/session";
 import { prefetchCryptoWasm, watchWasmResourceProgress } from "../lib/wasmProgress";
 
@@ -33,8 +31,6 @@ interface StorageContextValue {
   error: string | null;
   /** Live status lines while connecting (empty when not connecting). */
   connectLog: ConnectLogEntry[];
-  login: (homeserver: string, username: string, password: string) => Promise<void>;
-  register: (homeserver: string, username: string, password: string) => Promise<void>;
   /** Starts the OIDC/MAS login redirect — does not return on success
    * (navigates away). Sets `status`/`error` if discovery/DCR fail before
    * the redirect. */
@@ -96,7 +92,11 @@ export function StorageProvider({ children }: { children: ReactNode }) {
       const gen = ++connectGenRef.current;
 
       const run = (async () => {
-        // Keep an existing log (e.g. OIDC callback / password login already
+        // Keep the latest persisted token set for this client. OAuth providers may rotate the
+        // refresh token on one response and omit it on a later response; falling back to the
+        // session captured at connect() time would then resurrect an invalid, pre-rotation token.
+        let currentSession = s;
+        // Keep an existing log (e.g. an OIDC callback already
         // started connecting) instead of wiping it when connect() runs.
         if (connectStartedAtRef.current == null) {
           beginConnecting(`Restoring session for ${s.userId}…`);
@@ -118,43 +118,40 @@ export function StorageProvider({ children }: { children: ReactNode }) {
               }
             },
           };
-          let client: TeleCryptIOStorage;
+          let client!: TeleCryptIOStorage;
           try {
-            if (s.refreshToken && s.oidcIssuer && s.oidcClientId) {
-              appendLog("Discovering authentication server…");
-              const authMetadata = await discoverOidcIssuer(s.homeserver);
-              appendLog(`Auth issuer: ${authMetadata.issuer}`);
-              const tokenRefreshFunction = buildTokenRefreshFunction(
-                authMetadata.token_endpoint,
-                s.oidcClientId,
-                async (tokens) => {
-                  saveSession({
-                    ...s,
-                    accessToken: tokens.accessToken,
-                    refreshToken: tokens.refreshToken ?? s.refreshToken,
-                  });
-                },
-              );
-              appendLog("Building encrypted client (OIDC session)…");
-              client = await TeleCryptIOStorage.createFromOidc({
-                baseUrl: s.homeserver,
-                userId: s.userId,
-                accessToken: s.accessToken,
-                deviceId: s.deviceId,
-                refreshToken: s.refreshToken,
-                tokenRefreshFunction,
-                ...bootstrapOpts,
-              });
-            } else {
-              appendLog("Building encrypted client…");
-              client = await TeleCryptIOStorage.create({
-                baseUrl: s.homeserver,
-                userId: s.userId,
-                accessToken: s.accessToken,
-                deviceId: s.deviceId,
-                ...bootstrapOpts,
-              });
+            appendLog("Discovering authentication server…");
+            // Crypto and the Matrix SDK are intentionally fetched only when a
+            // session is being opened, not on the public sign-in screen.
+            const core = await import("../lib/core");
+            const authMetadata = await core.discoverOidcIssuer(s.homeserver);
+            if (authMetadata.issuer !== s.oidcIssuer) {
+              throw new Error("Authentication issuer changed; log in again");
             }
+            appendLog(`Auth issuer: ${authMetadata.issuer}`);
+            const tokenRefreshFunction = core.buildTokenRefreshFunction(
+              authMetadata.token_endpoint,
+              s.oidcClientId,
+              async (tokens) => {
+                currentSession = {
+                  ...currentSession,
+                  accessToken: tokens.accessToken,
+                  refreshToken: tokens.refreshToken ?? currentSession.refreshToken,
+                };
+                saveSession(currentSession);
+                if (gen === connectGenRef.current) setSession(currentSession);
+              },
+            );
+            appendLog("Building encrypted client (OIDC session)…");
+            client = await core.TeleCryptIOStorage.createFromOidc({
+              baseUrl: s.homeserver,
+              userId: s.userId,
+              accessToken: s.accessToken,
+              deviceId: s.deviceId,
+              refreshToken: s.refreshToken,
+              tokenRefreshFunction,
+              ...bootstrapOpts,
+            });
           } finally {
             wasmWatchStop();
           }
@@ -164,7 +161,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
           }
           appendLog("Connected.");
           setStorage(client);
-          setSession(s);
+          setSession(currentSession);
           setStatus("ready");
         } catch (err) {
           if (gen !== connectGenRef.current) return;
@@ -196,9 +193,11 @@ export function StorageProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (isOidcCallback()) {
+    const callbackParams = new URLSearchParams(window.location.search);
+    if (callbackParams.has("code") && callbackParams.has("state")) {
       beginConnecting("Completing sign-in…");
-      completeOidcLoginFromCallback()
+      void import("../lib/oidcAuth")
+        .then(({ completeOidcLoginFromCallback }) => completeOidcLoginFromCallback())
         .then((s) => {
           appendLog(`Signed in as ${s.userId}`);
           saveSession(s);
@@ -210,8 +209,8 @@ export function StorageProvider({ children }: { children: ReactNode }) {
           setError(msg);
           setStatus("error");
         });
-      // Intentionally run once on mount only; login()/register()/
-      // loginWithOidc() drive subsequent connections explicitly.
+      // Intentionally run once on mount only; loginWithOidc() drives
+      // subsequent connections explicitly.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       return;
     }
@@ -219,51 +218,16 @@ export function StorageProvider({ children }: { children: ReactNode }) {
     if (existing) {
       void connect(existing);
     }
-    // Intentionally run once on mount only; login()/register() drive
+    // Intentionally run once on mount only; loginWithOidc() drives
     // subsequent connections explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const login = useCallback(
-    async (homeserver: string, username: string, password: string) => {
-      beginConnecting("Signing in…");
-      try {
-        const s = await loginWithPassword(homeserver, username, password);
-        appendLog(`Signed in as ${s.userId}`);
-        saveSession(s);
-        await connect(s);
-      } catch (err) {
-        const msg = (err as Error).message;
-        appendLog(`Failed: ${msg}`);
-        setError(msg);
-        setStatus("error");
-      }
-    },
-    [appendLog, beginConnecting, connect],
-  );
-
-  const register = useCallback(
-    async (homeserver: string, username: string, password: string) => {
-      beginConnecting("Creating account…");
-      try {
-        const s = await registerAccount(homeserver, username, password);
-        appendLog(`Account ready: ${s.userId}`);
-        saveSession(s);
-        await connect(s);
-      } catch (err) {
-        const msg = (err as Error).message;
-        appendLog(`Failed: ${msg}`);
-        setError(msg);
-        setStatus("error");
-      }
-    },
-    [appendLog, beginConnecting, connect],
-  );
 
   const loginWithOidc = useCallback(
     async (homeserver: string) => {
       beginConnecting("Redirecting to sign-in…");
       try {
+        const { beginOidcLogin } = await import("../lib/oidcAuth");
         await beginOidcLogin(homeserver); // navigates away on success
       } catch (err) {
         const msg = (err as Error).message;
@@ -272,7 +236,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
         setStatus("error");
       }
     },
-    [appendLog, appendOrReplaceDownloadLog, beginConnecting],
+    [appendLog, beginConnecting],
   );
 
   const logout = useCallback(() => {
@@ -296,8 +260,6 @@ export function StorageProvider({ children }: { children: ReactNode }) {
         storage,
         error,
         connectLog,
-        login,
-        register,
         loginWithOidc,
         logout,
       }}
@@ -307,6 +269,8 @@ export function StorageProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// The provider and its paired hook intentionally share this module's private context.
+// oxlint-disable-next-line react/only-export-components
 export function useStorage(): StorageContextValue {
   const ctx = useContext(StorageContext);
   if (!ctx) throw new Error("useStorage() must be used within a StorageProvider");

@@ -92,6 +92,10 @@ export async function completeOidcLoginFromCallback(): Promise<Session> {
     state,
   );
 
+  if (!tokenResponse.refresh_token) {
+    throw new Error("completeOidcLoginFromCallback: MAS returned no refresh token");
+  }
+
   // Clear the one-time code/state from the address bar before anything else
   // can observe them (e.g. a refresh replaying a spent code).
   window.history.replaceState({}, "", window.location.pathname);
