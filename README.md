@@ -1,7 +1,7 @@
 # storage.telecrypt.io
 
 The static React/Vite site served at [storage.telecrypt.io](https://storage.telecrypt.io).
-It uses the exact published `@telecrypt-io/storage@0.2.1` browser library; storage protocol,
+It uses the exact published `@telecrypt-io/storage@0.2.3` browser library; storage protocol,
 cryptography, and the command-line client deliberately live in their own repositories.
 
 ## Source boundaries
