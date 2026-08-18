@@ -1,7 +1,7 @@
 {
   "name": "@telecrypt-io/storage-web",
   "private": true,
-  "version": "0.2.9",
+  "version": "0.2.10",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@telecrypt-io/storage": "0.2.9",
+    "@telecrypt-io/storage": "0.2.10",
     "buffer": "6.0.3",
     "matrix-encrypt-attachment": "1.0.3",
     "matrix-js-sdk": "41.9.0",
