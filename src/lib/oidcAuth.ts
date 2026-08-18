@@ -21,6 +21,7 @@ import {
 import type { Session } from "./session";
 
 const CLIENT_ID_PREFIX = "telecrypt-io-ui:oidc-client:";
+const DEVICE_ID_PREFIX = "telecrypt-io-ui:device:";
 
 function redirectUri(): string {
   return window.location.origin + "/";
@@ -32,6 +33,27 @@ function loadCachedClientId(issuer: string): string | null {
 
 function cacheClientId(issuer: string, clientId: string): void {
   localStorage.setItem(CLIENT_ID_PREFIX + issuer, clientId);
+}
+
+/**
+ * Returns this browser's stable Matrix device id for the given issuer,
+ * creating and persisting one on first use. Reusing the same device id on
+ * every login makes MAS grant the SAME Matrix device instead of minting a
+ * fresh one per login — without this, an account that logs in repeatedly
+ * accumulates hundreds of devices, and room-key shares to all of them time
+ * out (60s sendToDevice ceiling), breaking uploads.
+ */
+function loadOrCreateDeviceId(issuer: string): string {
+  const key = DEVICE_ID_PREFIX + issuer;
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const bytes = new Uint8Array(5);
+  crypto.getRandomValues(bytes);
+  const deviceId = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+  localStorage.setItem(key, deviceId);
+  return deviceId;
 }
 
 /**
@@ -61,6 +83,7 @@ export async function beginOidcLogin(homeserver: string): Promise<void> {
     clientId,
     homeserverUrl: homeserver,
     redirectUri: redirectUri(),
+    deviceId: loadOrCreateDeviceId(authMetadata.issuer),
   });
   window.location.href = url;
 }
