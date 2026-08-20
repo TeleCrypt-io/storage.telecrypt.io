@@ -16,7 +16,12 @@ vi.mock("./core", async () => {
   };
 });
 
-const METADATA = { issuer: "https://auth.example.test/" };
+const METADATA = {
+  issuer: "https://auth.example.test/",
+  authorization_endpoint: "https://auth.example.test/authorize",
+  token_endpoint: "https://auth.example.test/token",
+  registration_endpoint: "https://auth.example.test/register",
+};
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -86,6 +91,16 @@ describe("beginOidcLogin stable device id", () => {
     await expect(beginOidcLogin()).rejects.toThrow(
       "OIDC issuer does not match runtime settings",
     );
+    expect(core.registerClient).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token endpoint outside the runtime-configured issuer", async () => {
+    vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
+      ...METADATA,
+      token_endpoint: "https://other.example.test/token",
+    } as never);
+
+    await expect(beginOidcLogin()).rejects.toThrow("OIDC token endpoint");
     expect(core.registerClient).not.toHaveBeenCalled();
   });
 

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { TeleCryptIOStorage } from "../lib/core";
+import { assertRuntimeOidcEndpoint } from "../lib/buildConfig";
 import { clearSession, loadSession, saveSession, type Session } from "../lib/session";
 import { prefetchCryptoWasm, watchWasmResourceProgress } from "../lib/wasmProgress";
 
@@ -128,9 +129,13 @@ export function StorageProvider({ children }: { children: ReactNode }) {
             if (authMetadata.issuer !== s.oidcIssuer) {
               throw new Error("Authentication issuer changed; log in again");
             }
+            const tokenEndpoint = assertRuntimeOidcEndpoint(
+              authMetadata.token_endpoint,
+              "OIDC token endpoint",
+            );
             appendLog(`Auth issuer: ${authMetadata.issuer}`);
             const tokenRefreshFunction = core.buildTokenRefreshFunction(
-              authMetadata.token_endpoint,
+              tokenEndpoint,
               s.oidcClientId,
               async (tokens) => {
                 currentSession = {

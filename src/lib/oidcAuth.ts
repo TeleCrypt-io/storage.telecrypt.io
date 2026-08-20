@@ -19,7 +19,7 @@ import {
   whoAmI,
 } from "./core";
 import type { Session } from "./session";
-import { getRuntimeSettings } from "./buildConfig";
+import { assertRuntimeOidcEndpoint, getRuntimeSettings } from "./buildConfig";
 
 const CLIENT_ID_PREFIX = "telecrypt-io-ui:oidc-client:";
 const DEVICE_ID_PREFIX = "telecrypt-io-ui:device:";
@@ -68,6 +68,9 @@ export async function beginOidcLogin(): Promise<void> {
   if (authMetadata.issuer !== oidcIssuer) {
     throw new Error("OIDC issuer does not match runtime settings");
   }
+  assertRuntimeOidcEndpoint(authMetadata.authorization_endpoint, "OIDC authorization endpoint");
+  assertRuntimeOidcEndpoint(authMetadata.token_endpoint, "OIDC token endpoint");
+  assertRuntimeOidcEndpoint(authMetadata.registration_endpoint, "OIDC registration endpoint");
 
   let clientId = loadCachedClientId(authMetadata.issuer);
   if (!clientId) {
