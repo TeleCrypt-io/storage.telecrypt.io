@@ -47,10 +47,9 @@ jobs:
 
       - name: Build
         run: |
+          test -s public/runtime-settings.json
+          node -e 'const s = require("./public/runtime-settings.json"); if (s.homeserver !== "https://backend.telecrypt.io" || s.oidcIssuer !== "https://backend.telecrypt.io/auth/") process.exit(1)'
           npm run build
-        env:
-          VITE_HOMESERVER: https://backend.telecrypt.io
-          VITE_OIDC_ISSUER: https://backend.telecrypt.io/auth/
 
       - name: Setup Pages
         uses: actions/configure-pages@v6.0.0

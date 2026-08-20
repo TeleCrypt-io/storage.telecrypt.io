@@ -1,5 +1,5 @@
 import { useStorage } from "../context/StorageContext";
-import { BUILD_HOMESERVER } from "../lib/buildConfig";
+import { getRuntimeSettings } from "../lib/buildConfig";
 
 export function LoginScreen() {
   const { loginWithOidc, error, status } = useStorage();
@@ -12,7 +12,7 @@ export function LoginScreen() {
     await loginWithOidc();
   }
 
-  const oidcLabel = `Log in with ${new URL(BUILD_HOMESERVER).host}`;
+  const oidcLabel = `Log in with ${new URL(getRuntimeSettings().homeserver).host}`;
 
   return (
     <div className="centered">

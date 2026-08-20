@@ -183,7 +183,7 @@ describe("login", () => {
     expect(localStorage.getItem("telecrypt-io-ui:session")).toBeNull();
   });
 
-  it("discards a saved session for a different build homeserver", () => {
+  it("discards a saved session for a different runtime homeserver", () => {
     localStorage.setItem(
       "telecrypt-io-ui:session",
       JSON.stringify({ ...SESSION, homeserver: "https://unexpected.example.test" }),
@@ -194,7 +194,7 @@ describe("login", () => {
     expect(localStorage.getItem("telecrypt-io-ui:session")).toBeNull();
   });
 
-  it("discards a saved session for a different build issuer", () => {
+  it("discards a saved session for a different runtime issuer", () => {
     localStorage.setItem(
       "telecrypt-io-ui:session",
       JSON.stringify({ ...SESSION, oidcIssuer: "https://unexpected.example.test/" }),

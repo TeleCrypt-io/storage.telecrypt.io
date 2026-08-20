@@ -1,4 +1,4 @@
-import { BUILD_HOMESERVER, BUILD_OIDC_ISSUER } from "./buildConfig";
+import { getRuntimeSettings } from "./buildConfig";
 
 /**
  * Session persistence: homeserver/userId/deviceId/accessToken in localStorage.
@@ -28,6 +28,7 @@ export function loadSession(): Session | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<Session>;
+    const { homeserver, oidcIssuer } = getRuntimeSettings();
     if (
       isNonEmptyString(parsed.homeserver) &&
       isNonEmptyString(parsed.userId) &&
@@ -36,8 +37,8 @@ export function loadSession(): Session | null {
       isNonEmptyString(parsed.refreshToken) &&
       isNonEmptyString(parsed.oidcIssuer) &&
       isNonEmptyString(parsed.oidcClientId) &&
-      parsed.homeserver === BUILD_HOMESERVER &&
-      parsed.oidcIssuer === BUILD_OIDC_ISSUER
+      parsed.homeserver === homeserver &&
+      parsed.oidcIssuer === oidcIssuer
     ) {
       return parsed as Session;
     }
@@ -50,8 +51,9 @@ export function loadSession(): Session | null {
 }
 
 export function saveSession(session: Session): void {
-  if (session.homeserver !== BUILD_HOMESERVER || session.oidcIssuer !== BUILD_OIDC_ISSUER) {
-    throw new Error("Cannot save a session for a different build");
+  const { homeserver, oidcIssuer } = getRuntimeSettings();
+  if (session.homeserver !== homeserver || session.oidcIssuer !== oidcIssuer) {
+    throw new Error("Cannot save a session for a different runtime environment");
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
 }
