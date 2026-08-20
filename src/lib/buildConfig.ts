@@ -68,6 +68,31 @@ export function getRuntimeSettings(): RuntimeSettings {
   return runtimeSettings;
 }
 
+export function assertRuntimeOidcEndpoint(value: unknown, name: string): string {
+  if (typeof value !== "string") throw new Error(`${name} is missing from OIDC discovery`);
+  const issuer = new URL(getRuntimeSettings().oidcIssuer);
+  let endpoint: URL;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    throw new Error(`${name} must be a valid URL`);
+  }
+  if (
+    endpoint.protocol !== "https:" ||
+    endpoint.origin !== issuer.origin ||
+    !endpoint.pathname.startsWith(issuer.pathname) ||
+    endpoint.username !== "" ||
+    endpoint.password !== "" ||
+    endpoint.port !== "" ||
+    endpoint.search !== "" ||
+    endpoint.hash !== "" ||
+    endpoint.toString() !== value
+  ) {
+    throw new Error(`${name} must remain on the configured OIDC origin and /auth/ path`);
+  }
+  return value;
+}
+
 export async function fetchRuntimeSettings(
   fetchSettings: typeof fetch = fetch,
   origin: string = window.location.origin,
