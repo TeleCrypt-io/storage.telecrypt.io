@@ -156,7 +156,7 @@ describe("login", () => {
     expect(screen.queryByTestId("password")).not.toBeInTheDocument();
     expect(screen.queryByTestId("submit")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("oidc-login"));
-    expect(oidcAuth.beginOidcLogin).toHaveBeenCalledWith("http://localhost:8008");
+    expect(oidcAuth.beginOidcLogin).toHaveBeenCalledWith();
   });
 
   it("restores only an OIDC session and opens the vault list", async () => {
@@ -180,6 +180,28 @@ describe("login", () => {
     render(<App />);
     expect(screen.getByTestId("oidc-login")).toBeInTheDocument();
     expect(core.TeleCryptIOStorage.create).not.toHaveBeenCalled();
+    expect(localStorage.getItem("telecrypt-io-ui:session")).toBeNull();
+  });
+
+  it("discards a saved session for a different build homeserver", () => {
+    localStorage.setItem(
+      "telecrypt-io-ui:session",
+      JSON.stringify({ ...SESSION, homeserver: "https://unexpected.example.test" }),
+    );
+    render(<App />);
+    expect(screen.getByTestId("oidc-login")).toBeInTheDocument();
+    expect(core.TeleCryptIOStorage.createFromOidc).not.toHaveBeenCalled();
+    expect(localStorage.getItem("telecrypt-io-ui:session")).toBeNull();
+  });
+
+  it("discards a saved session for a different build issuer", () => {
+    localStorage.setItem(
+      "telecrypt-io-ui:session",
+      JSON.stringify({ ...SESSION, oidcIssuer: "https://unexpected.example.test/" }),
+    );
+    render(<App />);
+    expect(screen.getByTestId("oidc-login")).toBeInTheDocument();
+    expect(core.TeleCryptIOStorage.createFromOidc).not.toHaveBeenCalled();
     expect(localStorage.getItem("telecrypt-io-ui:session")).toBeNull();
   });
 
