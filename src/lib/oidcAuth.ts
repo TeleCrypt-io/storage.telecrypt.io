@@ -19,7 +19,7 @@ import {
   whoAmI,
 } from "./core";
 import type { Session } from "./session";
-import { BUILD_HOMESERVER, BUILD_OIDC_ISSUER } from "./buildConfig";
+import { getRuntimeSettings } from "./buildConfig";
 
 const CLIENT_ID_PREFIX = "telecrypt-io-ui:oidc-client:";
 const DEVICE_ID_PREFIX = "telecrypt-io-ui:device:";
@@ -63,9 +63,10 @@ function loadOrCreateDeviceId(issuer: string): string {
  * throws before redirecting if discovery/DCR fail.
  */
 export async function beginOidcLogin(): Promise<void> {
-  const authMetadata = await discoverOidcIssuer(BUILD_HOMESERVER);
-  if (authMetadata.issuer !== BUILD_OIDC_ISSUER) {
-    throw new Error("OIDC issuer does not match this build");
+  const { homeserver, oidcIssuer } = getRuntimeSettings();
+  const authMetadata = await discoverOidcIssuer(homeserver);
+  if (authMetadata.issuer !== oidcIssuer) {
+    throw new Error("OIDC issuer does not match runtime settings");
   }
 
   let clientId = loadCachedClientId(authMetadata.issuer);
@@ -85,7 +86,7 @@ export async function beginOidcLogin(): Promise<void> {
   const url = await beginAuthorizationCodeFlow({
     authMetadata,
     clientId,
-    homeserverUrl: BUILD_HOMESERVER,
+    homeserverUrl: homeserver,
     redirectUri: redirectUri(),
     deviceId: loadOrCreateDeviceId(authMetadata.issuer),
   });
@@ -123,11 +124,12 @@ export async function completeOidcLoginFromCallback(): Promise<Session> {
   // handling the returned session so an error cannot leave them on reload.
   window.history.replaceState({}, "", window.location.pathname);
 
-  if (homeserverUrl !== BUILD_HOMESERVER) {
-    throw new Error("OIDC callback homeserver does not match this build");
+  const { homeserver, oidcIssuer } = getRuntimeSettings();
+  if (homeserverUrl !== homeserver) {
+    throw new Error("OIDC callback homeserver does not match runtime settings");
   }
-  if (oidcClientSettings.issuer !== BUILD_OIDC_ISSUER) {
-    throw new Error("OIDC callback issuer does not match this build");
+  if (oidcClientSettings.issuer !== oidcIssuer) {
+    throw new Error("OIDC callback issuer does not match runtime settings");
   }
 
   if (!tokenResponse.refresh_token) {

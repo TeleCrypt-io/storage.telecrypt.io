@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const productionConnectSrc = "connect-src 'self' https://backend.telecrypt.io;";
+const productionConnectSrc = "connect-src 'self' https://telecrypt.io https://*.telecrypt.io;";
 const developmentConnectSrc =
   "connect-src 'self' https://backend.telecrypt.io http://localhost:* ws://localhost:*;";
 
@@ -12,6 +12,12 @@ const developmentConnectSrc =
 // matrix-js-sdk resolves via its own "browser" package.json field, which Vite
 // picks up automatically — no further Node polyfills needed.
 export default defineConfig({
+  build: {
+    // The separately emitted encrypted IndexedDB worker is about 747 kB minified. Keep a narrow
+    // reviewed ceiling above it so this required crypto chunk is not a standing warning and future
+    // growth still fails visibly during release review.
+    chunkSizeWarningLimit: 800,
+  },
   plugins: [
     react(),
     {

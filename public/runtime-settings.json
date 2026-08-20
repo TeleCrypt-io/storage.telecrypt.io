@@ -1,0 +1,4 @@
+{
+  "homeserver": "https://backend.telecrypt.io",
+  "oidcIssuer": "https://backend.telecrypt.io/auth/"
+}

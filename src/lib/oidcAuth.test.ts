@@ -1,7 +1,7 @@
 // Unit tests for the stable device-id persistence in the OIDC login flow.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { beginOidcLogin, completeOidcLoginFromCallback } from "./oidcAuth";
-import { BUILD_HOMESERVER } from "./buildConfig";
+import { getRuntimeSettings } from "./buildConfig";
 import * as core from "./core";
 
 vi.mock("./core", async () => {
@@ -80,11 +80,11 @@ describe("beginOidcLogin stable device id", () => {
     expect(second.deviceId).toBe(opts.deviceId);
   });
 
-  it("rejects discovery from an issuer other than the build-configured issuer", async () => {
+  it("rejects discovery from an issuer other than the runtime-configured issuer", async () => {
     vi.mocked(core.discoverOidcIssuer).mockResolvedValue({ issuer: "https://unexpected.example.test/" } as never);
 
     await expect(beginOidcLogin()).rejects.toThrow(
-      "OIDC issuer does not match this build",
+      "OIDC issuer does not match runtime settings",
     );
     expect(core.registerClient).not.toHaveBeenCalled();
   });
@@ -101,7 +101,7 @@ describe("beginOidcLogin stable device id", () => {
     } as never);
 
     await expect(completeOidcLoginFromCallback()).rejects.toThrow(
-      "OIDC callback homeserver does not match this build",
+      "OIDC callback homeserver does not match runtime settings",
     );
     expect(core.whoAmI).not.toHaveBeenCalled();
   });
@@ -112,13 +112,13 @@ describe("beginOidcLogin stable device id", () => {
       value: { origin: "https://storage.test", search: "?code=one&state=two", pathname: "/" },
     });
     vi.mocked(core.completeAuthorizationCodeFlow).mockResolvedValue({
-      homeserverUrl: BUILD_HOMESERVER,
+      homeserverUrl: getRuntimeSettings().homeserver,
       oidcClientSettings: { issuer: "https://unexpected.example.test/", clientId: "client-123" },
       tokenResponse: { access_token: "access", refresh_token: "refresh", scope: "scope" },
     } as never);
 
     await expect(completeOidcLoginFromCallback()).rejects.toThrow(
-      "OIDC callback issuer does not match this build",
+      "OIDC callback issuer does not match runtime settings",
     );
     expect(core.whoAmI).not.toHaveBeenCalled();
   });
