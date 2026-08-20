@@ -1,22 +1,18 @@
 import { useStorage } from "../context/StorageContext";
+import { BUILD_HOMESERVER } from "../lib/buildConfig";
 
 export function LoginScreen() {
   const { loginWithOidc, error, status } = useStorage();
   // The product always uses MAS/OIDC. A local development server can be
   // selected explicitly, but password compatibility authentication is never
   // exposed by this client.
-  const homeserver =
-    import.meta.env.VITE_HOMESERVER ??
-    (import.meta.env.PROD ? "https://backend.telecrypt.io" : undefined);
-  const resolvedHomeserver = homeserver ?? "http://localhost:8008";
-
   const busy = status === "connecting";
 
   async function handleOidc() {
-    await loginWithOidc(resolvedHomeserver);
+    await loginWithOidc();
   }
 
-  const oidcLabel = `Log in with ${new URL(resolvedHomeserver).host}`;
+  const oidcLabel = `Log in with ${new URL(BUILD_HOMESERVER).host}`;
 
   return (
     <div className="centered">

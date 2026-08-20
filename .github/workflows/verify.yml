@@ -35,3 +35,4 @@ jobs:
         run: npm run build
         env:
           VITE_HOMESERVER: https://backend.telecrypt.io
+          VITE_OIDC_ISSUER: https://backend.telecrypt.io/auth/

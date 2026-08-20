@@ -34,7 +34,7 @@ interface StorageContextValue {
   /** Starts the OIDC/MAS login redirect — does not return on success
    * (navigates away). Sets `status`/`error` if discovery/DCR fail before
    * the redirect. */
-  loginWithOidc: (homeserver: string) => Promise<void>;
+  loginWithOidc: () => Promise<void>;
   logout: () => void;
 }
 
@@ -224,11 +224,11 @@ export function StorageProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loginWithOidc = useCallback(
-    async (homeserver: string) => {
+    async () => {
       beginConnecting("Redirecting to sign-in…");
       try {
         const { beginOidcLogin } = await import("../lib/oidcAuth");
-        await beginOidcLogin(homeserver); // navigates away on success
+        await beginOidcLogin(); // navigates away on success
       } catch (err) {
         const msg = (err as Error).message;
         appendLog(`Failed: ${msg}`);

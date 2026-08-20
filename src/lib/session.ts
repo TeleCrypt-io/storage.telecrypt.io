@@ -1,3 +1,5 @@
+import { BUILD_HOMESERVER, BUILD_OIDC_ISSUER } from "./buildConfig";
+
 /**
  * Session persistence: homeserver/userId/deviceId/accessToken in localStorage.
  * This is the ONLY thing the UI persists itself — the crypto store persists
@@ -33,7 +35,9 @@ export function loadSession(): Session | null {
       isNonEmptyString(parsed.accessToken) &&
       isNonEmptyString(parsed.refreshToken) &&
       isNonEmptyString(parsed.oidcIssuer) &&
-      isNonEmptyString(parsed.oidcClientId)
+      isNonEmptyString(parsed.oidcClientId) &&
+      parsed.homeserver === BUILD_HOMESERVER &&
+      parsed.oidcIssuer === BUILD_OIDC_ISSUER
     ) {
       return parsed as Session;
     }
@@ -46,6 +50,9 @@ export function loadSession(): Session | null {
 }
 
 export function saveSession(session: Session): void {
+  if (session.homeserver !== BUILD_HOMESERVER || session.oidcIssuer !== BUILD_OIDC_ISSUER) {
+    throw new Error("Cannot save a session for a different build");
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
 }
 

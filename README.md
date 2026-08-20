@@ -1,7 +1,7 @@
 # storage.telecrypt.io
 
 The static React/Vite site served at [storage.telecrypt.io](https://storage.telecrypt.io).
-It uses the exact published `@telecrypt-io/storage@0.2.5` browser library; storage protocol,
+It uses the exact published `@telecrypt-io/storage@0.2.12` browser library; storage protocol,
 cryptography, and the command-line client deliberately live in their own repositories.
 
 ## Source boundaries
@@ -41,5 +41,6 @@ Browser acceptance tooling is operator-local Harness work, never a GitHub Action
 ## Releases and deployment
 
 Pushes and pull requests to `main` only verify the source. GitHub Pages deploys only when an
-immutable `storage-web-v*` release tag is pushed. A deployment therefore always identifies the
-exact source release that produced it; it never builds from a branch.
+annotated `storage-web-v*` release tag is pushed. The workflow checks the tag type and package
+version, and the repository ruleset forbids updating or deleting a release tag. Every correction
+therefore requires a new version.

@@ -19,6 +19,7 @@ import {
   whoAmI,
 } from "./core";
 import type { Session } from "./session";
+import { BUILD_HOMESERVER, BUILD_OIDC_ISSUER } from "./buildConfig";
 
 const CLIENT_ID_PREFIX = "telecrypt-io-ui:oidc-client:";
 const DEVICE_ID_PREFIX = "telecrypt-io-ui:device:";
@@ -61,8 +62,11 @@ function loadOrCreateDeviceId(issuer: string): string {
  * URL → redirect. Never returns normally on success (navigates away);
  * throws before redirecting if discovery/DCR fail.
  */
-export async function beginOidcLogin(homeserver: string): Promise<void> {
-  const authMetadata = await discoverOidcIssuer(homeserver);
+export async function beginOidcLogin(): Promise<void> {
+  const authMetadata = await discoverOidcIssuer(BUILD_HOMESERVER);
+  if (authMetadata.issuer !== BUILD_OIDC_ISSUER) {
+    throw new Error("OIDC issuer does not match this build");
+  }
 
   let clientId = loadCachedClientId(authMetadata.issuer);
   if (!clientId) {
@@ -81,7 +85,7 @@ export async function beginOidcLogin(homeserver: string): Promise<void> {
   const url = await beginAuthorizationCodeFlow({
     authMetadata,
     clientId,
-    homeserverUrl: homeserver,
+    homeserverUrl: BUILD_HOMESERVER,
     redirectUri: redirectUri(),
     deviceId: loadOrCreateDeviceId(authMetadata.issuer),
   });
@@ -115,13 +119,20 @@ export async function completeOidcLoginFromCallback(): Promise<Session> {
     state,
   );
 
+  // Clear the one-time code/state from the address bar before validating or
+  // handling the returned session so an error cannot leave them on reload.
+  window.history.replaceState({}, "", window.location.pathname);
+
+  if (homeserverUrl !== BUILD_HOMESERVER) {
+    throw new Error("OIDC callback homeserver does not match this build");
+  }
+  if (oidcClientSettings.issuer !== BUILD_OIDC_ISSUER) {
+    throw new Error("OIDC callback issuer does not match this build");
+  }
+
   if (!tokenResponse.refresh_token) {
     throw new Error("completeOidcLoginFromCallback: MAS returned no refresh token");
   }
-
-  // Clear the one-time code/state from the address bar before anything else
-  // can observe them (e.g. a refresh replaying a spent code).
-  window.history.replaceState({}, "", window.location.pathname);
 
   const deviceId = extractDeviceIdFromScope(tokenResponse.scope);
   if (!deviceId) {
