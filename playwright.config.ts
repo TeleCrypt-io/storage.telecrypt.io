@@ -1,8 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// E2E: real disposable Synapse (podman), real crypto, real browser — no
-// mocks. Starts both the Vite dev server and Synapse
-// itself so `npm run e2e` is a single self-contained command.
+// Playwright forces colored child-process output; do not also pass NO_COLOR,
+// which Node reports as a conflicting, ignored setting.
+delete process.env.NO_COLOR;
+
+// E2E uses the operator-started disposable Synapse/MAS fixture at localhost:8008
+// and starts only this repository's Vite development server.
 export default defineConfig({
   testDir: "./test/e2e",
   timeout: 90_000,
@@ -15,19 +18,11 @@ export default defineConfig({
     baseURL: "http://localhost:5173",
     trace: "retain-on-failure",
   },
-  webServer: [
-    {
-      command: "npx vite --port 5173 --strictPort",
-      url: "http://localhost:5173",
-      reuseExistingServer: true,
-      timeout: 30_000,
-    },
-    {
-      command: "bash ../throwaway_synapse/up.sh",
-      url: "http://localhost:8008/_matrix/client/versions",
-      reuseExistingServer: true,
-      timeout: 120_000,
-    },
-  ],
+  webServer: {
+    command: "npx vite --port 5173 --strictPort",
+    url: "http://localhost:5173",
+    reuseExistingServer: true,
+    timeout: 30_000,
+  },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

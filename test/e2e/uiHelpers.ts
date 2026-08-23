@@ -6,7 +6,7 @@ import type { E2eUser } from "./testUsers";
  * disposable MAS. Test credentials are entered only into MAS's page, never
  * into the Storage application. */
 async function completeMasOidcLogin(page: Page, user: E2eUser): Promise<void> {
-  await page.waitForURL(/localhost:8082/, { timeout: 20_000 });
+  await page.waitForURL(/localhost:8008\/auth(?:\/|$)/, { timeout: 20_000 });
   await page.getByLabel("Username").fill(user.localpart);
   await page.getByLabel("Password").fill(user.password);
   await page.getByRole("button", { name: "Continue" }).click();
@@ -14,9 +14,10 @@ async function completeMasOidcLogin(page: Page, user: E2eUser): Promise<void> {
   // Each isolated browser context dynamically registers its own public OIDC
   // client, so MAS normally asks for consent. Accept it when presented; an
   // existing authorized client may instead redirect straight back to Storage.
-  const consentCheckbox = page.locator('input[type="checkbox"]');
-  if (await consentCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await consentCheckbox.check();
+  const consentHeading = page.getByRole("heading", { name: /^Continue to / });
+  if (await consentHeading.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const consentCheckbox = page.locator('input[type="checkbox"]');
+    if (await consentCheckbox.isVisible().catch(() => false)) await consentCheckbox.check();
     await page.getByRole("button", { name: "Continue" }).click();
   }
 }
@@ -43,16 +44,10 @@ export async function createVault(page: Page, name: string): Promise<string> {
   return folderId;
 }
 
-/** @deprecated use createVault */
-export const createFolder = createVault;
-
 export async function openVaultByName(page: Page, name: string): Promise<void> {
   await page.locator(".folder-list-btn", { hasText: name }).click();
   await expect(page.getByTestId("folder-detail")).toBeVisible();
 }
-
-/** @deprecated use openVaultByName */
-export const openFolderByName = openVaultByName;
 
 /** userB's side: accept a pending invite for the shared vault. */
 export async function joinFolder(

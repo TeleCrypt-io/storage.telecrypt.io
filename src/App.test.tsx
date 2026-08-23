@@ -6,6 +6,7 @@ import * as core from "./lib/core";
 import * as oidcAuth from "./lib/oidcAuth";
 import { formatElapsed } from "./lib/formatElapsed";
 import { formatOperationError } from "./lib/formatOperationError";
+import { runtimeOidcIssuer, getRuntimeSettings } from "./lib/buildConfig";
 
 vi.mock("./lib/core", async () => {
   const actual = await vi.importActual<typeof import("./lib/core")>("./lib/core");
@@ -41,7 +42,6 @@ vi.mock("./lib/core", async () => {
 vi.mock("./lib/oidcAuth", () => ({
   beginOidcLogin: vi.fn(),
   completeOidcLoginFromCallback: vi.fn(),
-  isOidcCallback: vi.fn(() => false),
 }));
 
 const SESSION = {
@@ -50,7 +50,6 @@ const SESSION = {
   deviceId: "DEVICE1",
   accessToken: "tok-123",
   refreshToken: "refresh-123",
-  oidcIssuer: "https://auth.example.test/",
   oidcClientId: "client-123",
 };
 
@@ -68,8 +67,8 @@ function fakeStorage() {
 async function loginAndReachVaults(initialVaults: Array<{ id: string; name: string }> = []) {
   const storage = fakeStorage();
   vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
-    issuer: SESSION.oidcIssuer,
-    token_endpoint: "https://auth.example.test/token",
+    issuer: runtimeOidcIssuer(),
+    token_endpoint: `${getRuntimeSettings().homeserver}/auth/token`,
   } as never);
   vi.mocked(core.TeleCryptIOStorage.createFromOidc).mockResolvedValue(storage as never);
   vi.mocked(core.listFolders).mockResolvedValue(initialVaults);
@@ -172,7 +171,7 @@ describe("login", () => {
     expect(screen.getByTestId("no-vaults")).toBeInTheDocument();
   });
 
-  it("discards a legacy non-OIDC session", () => {
+  it("discards an incomplete OIDC session", () => {
     localStorage.setItem(
       "telecrypt-io-ui:session",
       JSON.stringify({ ...SESSION, refreshToken: undefined }),
@@ -187,17 +186,6 @@ describe("login", () => {
     localStorage.setItem(
       "telecrypt-io-ui:session",
       JSON.stringify({ ...SESSION, homeserver: "https://unexpected.example.test" }),
-    );
-    render(<App />);
-    expect(screen.getByTestId("oidc-login")).toBeInTheDocument();
-    expect(core.TeleCryptIOStorage.createFromOidc).not.toHaveBeenCalled();
-    expect(localStorage.getItem("telecrypt-io-ui:session")).toBeNull();
-  });
-
-  it("discards a saved session for a different runtime issuer", () => {
-    localStorage.setItem(
-      "telecrypt-io-ui:session",
-      JSON.stringify({ ...SESSION, oidcIssuer: "https://unexpected.example.test/" }),
     );
     render(<App />);
     expect(screen.getByTestId("oidc-login")).toBeInTheDocument();

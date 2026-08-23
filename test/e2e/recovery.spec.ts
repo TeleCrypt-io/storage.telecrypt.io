@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { registerE2eUser, waitForServerBackupCount } from "./testUsers";
-import { createFolder, downloadFileBytes, loginViaUI, openFolderByName, uploadFile, confirmRecoveryKeySaved, restoreRecoveryKey } from "./uiHelpers";
+import { createVault, downloadFileBytes, loginViaUI, openVaultByName, uploadFile, confirmRecoveryKeySaved, restoreRecoveryKey } from "./uiHelpers";
 
 // Mirrors test/functional/keys.test.ts 5.3 ("a genuinely new device recovers
 // files via the Recovery Key") through the UI: set up recovery, capture the
@@ -21,8 +21,8 @@ test("recovery: set up on device A, restore and read a file on a fresh device B"
 
   try {
     await loginViaUI(pageA, user);
-    await createFolder(pageA, "RecoveryTest");
-    await openFolderByName(pageA, "RecoveryTest");
+    await createVault(pageA, "RecoveryTest");
+    await openVaultByName(pageA, "RecoveryTest");
     await uploadFile(pageA, "important.txt", "text/plain", original);
 
     await pageA.getByTestId("nav-recovery").click();
@@ -50,7 +50,7 @@ test("recovery: set up on device A, restore and read a file on a fresh device B"
     const pageB = await contextB.newPage();
     try {
       await loginViaUI(pageB, user);
-      await openFolderByName(pageB, "RecoveryTest");
+      await openVaultByName(pageB, "RecoveryTest");
       await expect(
         pageB.locator('[data-testid="file-item"]', { hasText: "important.txt" }),
       ).toBeVisible({ timeout: 20000 });
@@ -71,7 +71,7 @@ test("recovery: set up on device A, restore and read a file on a fresh device B"
       // Now the file must decrypt (poll — decryption settling after a
       // restore is real async work, not instant).
       await pageB.getByTestId("nav-folders").click();
-      await openFolderByName(pageB, "RecoveryTest");
+      await openVaultByName(pageB, "RecoveryTest");
       const downloaded = await downloadFileBytes(pageB, "important.txt");
       expect(downloaded.equals(original)).toBe(true);
     } finally {

@@ -17,10 +17,10 @@ vi.mock("./core", async () => {
 });
 
 const METADATA = {
-  issuer: "https://auth.example.test/",
-  authorization_endpoint: "https://auth.example.test/authorize",
-  token_endpoint: "https://auth.example.test/token",
-  registration_endpoint: "https://auth.example.test/register",
+  issuer: `${getRuntimeSettings().homeserver}/auth/`,
+  authorization_endpoint: `${getRuntimeSettings().homeserver}/auth/authorize`,
+  token_endpoint: `${getRuntimeSettings().homeserver}/auth/token`,
+  registration_endpoint: `${getRuntimeSettings().homeserver}/auth/register`,
 };
 
 function memoryStorage(): Storage {

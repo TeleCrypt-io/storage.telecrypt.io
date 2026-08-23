@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { TeleCryptIOStorage } from "../lib/core";
-import { assertRuntimeOidcEndpoint } from "../lib/buildConfig";
+import { assertRuntimeOidcEndpoint, getRuntimeSettings, runtimeOidcIssuer } from "../lib/buildConfig";
 import { clearSession, loadSession, saveSession, type Session } from "../lib/session";
 import { prefetchCryptoWasm, watchWasmResourceProgress } from "../lib/wasmProgress";
 
@@ -125,8 +125,9 @@ export function StorageProvider({ children }: { children: ReactNode }) {
             // Crypto and the Matrix SDK are intentionally fetched only when a
             // session is being opened, not on the public sign-in screen.
             const core = await import("../lib/core");
-            const authMetadata = await core.discoverOidcIssuer(s.homeserver);
-            if (authMetadata.issuer !== s.oidcIssuer) {
+            const homeserver = getRuntimeSettings().homeserver;
+            const authMetadata = await core.discoverOidcIssuer(homeserver);
+            if (authMetadata.issuer !== runtimeOidcIssuer()) {
               throw new Error("Authentication issuer changed; log in again");
             }
             const tokenEndpoint = assertRuntimeOidcEndpoint(
@@ -149,7 +150,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
             );
             appendLog("Building encrypted client (OIDC session)…");
             client = await core.TeleCryptIOStorage.createFromOidc({
-              baseUrl: s.homeserver,
+              baseUrl: homeserver,
               userId: s.userId,
               accessToken: s.accessToken,
               deviceId: s.deviceId,

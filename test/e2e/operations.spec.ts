@@ -1,12 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { registerE2eUser } from "./testUsers";
-import { createFolder, loginViaUI, openFolderByName, uploadFile } from "./uiHelpers";
+import { createVault, loginViaUI, openVaultByName, uploadFile } from "./uiHelpers";
 
 test("rename and delete a file", async ({ page }) => {
   const user = await registerE2eUser("e2e_rename_file");
   await loginViaUI(page, user);
-  await createFolder(page, "RenameTest");
-  await openFolderByName(page, "RenameTest");
+  await createVault(page, "RenameTest");
+  await openVaultByName(page, "RenameTest");
 
   const original = Buffer.from("rename me");
   await uploadFile(page, "old.txt", "text/plain", original);
@@ -28,8 +28,8 @@ test("rename and delete a file", async ({ page }) => {
 test("create subfolder, upload inside, rename and delete subfolder", async ({ page }) => {
   const user = await registerE2eUser("e2e_subfolder");
   await loginViaUI(page, user);
-  await createFolder(page, "Parent");
-  await openFolderByName(page, "Parent");
+  await createVault(page, "Parent");
+  await openVaultByName(page, "Parent");
 
   await page.getByTestId("create-subfolder").click();
   const renameInput = page.getByTestId("rename-input");
@@ -41,7 +41,7 @@ test("create subfolder, upload inside, rename and delete subfolder", async ({ pa
   });
 
   await page.locator('[data-testid="subfolder-item"]', { hasText: "Child" }).locator(".row-name-btn").click();
-  await expect(page.getByTestId("folder-detail").getByRole("button", { name: "Child" })).toBeVisible();
+  await expect(page.getByLabel("Folder path").getByTestId("breadcrumb-item").last()).toHaveText("Child");
 
   const bytes = Buffer.from("inside subfolder");
   await uploadFile(page, "inside.txt", "text/plain", bytes);

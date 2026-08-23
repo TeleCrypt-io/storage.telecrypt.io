@@ -5,12 +5,10 @@
  */
 export interface RuntimeSettings {
   homeserver: string;
-  oidcIssuer: string;
 }
 
 const developmentSettings: RuntimeSettings = {
   homeserver: "http://localhost:8008",
-  oidcIssuer: "https://auth.example.test/",
 };
 
 let runtimeSettings: RuntimeSettings | null = import.meta.env.DEV ? developmentSettings : null;
@@ -56,11 +54,11 @@ export function validateRuntimeSettings(value: unknown): RuntimeSettings {
   }
   const raw = value as Partial<RuntimeSettings>;
   const homeserver = canonicalTeleCryptUrl("homeserver", raw.homeserver, "/");
-  const oidcIssuer = canonicalTeleCryptUrl("oidcIssuer", raw.oidcIssuer, "/auth/");
-  if (new URL(homeserver).origin !== new URL(oidcIssuer).origin) {
-    throw new Error("homeserver and oidcIssuer must have the same origin");
-  }
-  return { homeserver, oidcIssuer };
+  return { homeserver };
+}
+
+export function runtimeOidcIssuer(): string {
+  return `${getRuntimeSettings().homeserver}/auth/`;
 }
 
 export function getRuntimeSettings(): RuntimeSettings {
@@ -70,7 +68,7 @@ export function getRuntimeSettings(): RuntimeSettings {
 
 export function assertRuntimeOidcEndpoint(value: unknown, name: string): string {
   if (typeof value !== "string") throw new Error(`${name} is missing from OIDC discovery`);
-  const issuer = new URL(getRuntimeSettings().oidcIssuer);
+  const issuer = new URL(runtimeOidcIssuer());
   let endpoint: URL;
   try {
     endpoint = new URL(value);
@@ -78,12 +76,12 @@ export function assertRuntimeOidcEndpoint(value: unknown, name: string): string 
     throw new Error(`${name} must be a valid URL`);
   }
   if (
-    endpoint.protocol !== "https:" ||
+    endpoint.protocol !== issuer.protocol ||
     endpoint.origin !== issuer.origin ||
     !endpoint.pathname.startsWith(issuer.pathname) ||
     endpoint.username !== "" ||
     endpoint.password !== "" ||
-    endpoint.port !== "" ||
+    endpoint.port !== issuer.port ||
     endpoint.search !== "" ||
     endpoint.hash !== "" ||
     endpoint.toString() !== value
