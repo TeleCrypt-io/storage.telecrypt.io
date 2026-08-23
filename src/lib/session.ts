@@ -1,7 +1,7 @@
 import { getRuntimeSettings } from "./buildConfig";
 
 /**
- * Session persistence: homeserver/userId/deviceId/accessToken in localStorage.
+ * Session persistence: homeserver/user/device/tokens in localStorage.
  * This is the ONLY thing the UI persists itself — the crypto store persists
  * on its own via the browser's native IndexedDB (see TeleCryptIOStorage.create,
  * called with its default persistentCryptoStore: true).
@@ -13,7 +13,6 @@ export interface Session {
   accessToken: string;
   /** OIDC/MAS authorization-code + PKCE session fields. */
   refreshToken: string;
-  oidcIssuer: string;
   oidcClientId: string;
 }
 
@@ -28,17 +27,15 @@ export function loadSession(): Session | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<Session>;
-    const { homeserver, oidcIssuer } = getRuntimeSettings();
+    const { homeserver } = getRuntimeSettings();
     if (
       isNonEmptyString(parsed.homeserver) &&
       isNonEmptyString(parsed.userId) &&
       isNonEmptyString(parsed.deviceId) &&
       isNonEmptyString(parsed.accessToken) &&
       isNonEmptyString(parsed.refreshToken) &&
-      isNonEmptyString(parsed.oidcIssuer) &&
       isNonEmptyString(parsed.oidcClientId) &&
-      parsed.homeserver === homeserver &&
-      parsed.oidcIssuer === oidcIssuer
+      parsed.homeserver === homeserver
     ) {
       return parsed as Session;
     }
@@ -51,8 +48,8 @@ export function loadSession(): Session | null {
 }
 
 export function saveSession(session: Session): void {
-  const { homeserver, oidcIssuer } = getRuntimeSettings();
-  if (session.homeserver !== homeserver || session.oidcIssuer !== oidcIssuer) {
+  const { homeserver } = getRuntimeSettings();
+  if (session.homeserver !== homeserver) {
     throw new Error("Cannot save a session for a different runtime environment");
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(session));

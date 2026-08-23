@@ -1,51 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { fetchRuntimeSettings, validateRuntimeSettings } from "./buildConfig";
+import {
+  fetchRuntimeSettings,
+  getRuntimeSettings,
+  runtimeOidcIssuer,
+  validateRuntimeSettings,
+} from "./buildConfig";
 
 describe("validateRuntimeSettings", () => {
-  it("accepts a canonical same-origin homeserver and issuer", () => {
+  it("accepts one canonical backend origin and derives its MAS issuer", () => {
     expect(
       validateRuntimeSettings({
         homeserver: "https://backend.telecrypt.io",
-        oidcIssuer: "https://backend.telecrypt.io/auth/",
       }),
     ).toEqual({
       homeserver: "https://backend.telecrypt.io",
-      oidcIssuer: "https://backend.telecrypt.io/auth/",
     });
   });
 
   it.each([
     [
       "a noncanonical homeserver trailing slash",
-      { homeserver: "https://backend.telecrypt.io/", oidcIssuer: "https://backend.telecrypt.io/auth/" },
+      { homeserver: "https://backend.telecrypt.io/" },
     ],
     [
       "an HTTP homeserver",
-      { homeserver: "http://backend.telecrypt.io", oidcIssuer: "https://backend.telecrypt.io/auth/" },
+      { homeserver: "http://backend.telecrypt.io" },
     ],
     [
       "a homeserver path",
-      { homeserver: "https://backend.telecrypt.io/matrix", oidcIssuer: "https://backend.telecrypt.io/auth/" },
+      { homeserver: "https://backend.telecrypt.io/matrix" },
     ],
     [
       "a non-TeleCrypt host",
-      { homeserver: "https://backend.example.test", oidcIssuer: "https://backend.example.test/auth/" },
-    ],
-    [
-      "a different issuer origin",
-      { homeserver: "https://backend.telecrypt.io", oidcIssuer: "https://auth.telecrypt.io/auth/" },
-    ],
-    [
-      "an issuer without a trailing slash",
-      { homeserver: "https://backend.telecrypt.io", oidcIssuer: "https://backend.telecrypt.io/auth" },
-    ],
-    [
-      "an arbitrary issuer path",
-      { homeserver: "https://backend.telecrypt.io", oidcIssuer: "https://backend.telecrypt.io/other/" },
+      { homeserver: "https://backend.example.test" },
     ],
     [
       "a URL with a query",
-      { homeserver: "https://backend.telecrypt.io?x=1", oidcIssuer: "https://backend.telecrypt.io/auth/" },
+      { homeserver: "https://backend.telecrypt.io?x=1" },
     ],
   ])("rejects %s", (_description, value) => {
     expect(() => validateRuntimeSettings(value)).toThrow();
@@ -59,13 +50,11 @@ describe("fetchRuntimeSettings", () => {
       expect(init).toEqual({ cache: "no-store", credentials: "same-origin" });
       return new Response(JSON.stringify({
         homeserver: "https://backend-preproduction.telecrypt.io",
-        oidcIssuer: "https://backend-preproduction.telecrypt.io/auth/",
       }), { status: 200 });
     };
     await expect(fetchRuntimeSettings(fetchSettings, "https://storage-preproduction.telecrypt.io"))
       .resolves.toEqual({
         homeserver: "https://backend-preproduction.telecrypt.io",
-        oidcIssuer: "https://backend-preproduction.telecrypt.io/auth/",
       });
   });
 
@@ -76,9 +65,14 @@ describe("fetchRuntimeSettings", () => {
 
     const invalid = async () => new Response(JSON.stringify({
       homeserver: "https://backend.example.test",
-      oidcIssuer: "https://backend.example.test/auth/",
     }), { status: 200 });
     await expect(fetchRuntimeSettings(invalid, "https://storage.telecrypt.io"))
       .rejects.toThrow("TeleCrypt");
+  });
+});
+
+describe("runtimeOidcIssuer", () => {
+  it("derives the canonical MAS path from runtime settings", () => {
+    expect(runtimeOidcIssuer()).toBe(`${getRuntimeSettings().homeserver}/auth/`);
   });
 });

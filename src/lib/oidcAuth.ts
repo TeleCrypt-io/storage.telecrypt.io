@@ -1,8 +1,7 @@
 /**
  * OIDC/MAS login for the web UI: authorization-code + PKCE. Thin browser
  * adapter over the shared `src/core/oidc.ts` protocol calls (discovery, DCR,
- * PKCE URL building, token exchange) — mirrors what src/cli/oidc.ts does for
- * the CLI's device-code flow.
+ * PKCE URL building, token exchange).
  *
  * PKCE code_verifier + state are persisted by matrix-js-sdk/oidc-client-ts
  * itself, in window.sessionStorage (`mx_oidc_`-prefixed keys) — this module
@@ -19,7 +18,7 @@ import {
   whoAmI,
 } from "./core";
 import type { Session } from "./session";
-import { assertRuntimeOidcEndpoint, getRuntimeSettings } from "./buildConfig";
+import { assertRuntimeOidcEndpoint, getRuntimeSettings, runtimeOidcIssuer } from "./buildConfig";
 
 const CLIENT_ID_PREFIX = "telecrypt-io-ui:oidc-client:";
 const DEVICE_ID_PREFIX = "telecrypt-io-ui:device:";
@@ -63,7 +62,8 @@ function loadOrCreateDeviceId(issuer: string): string {
  * throws before redirecting if discovery/DCR fail.
  */
 export async function beginOidcLogin(): Promise<void> {
-  const { homeserver, oidcIssuer } = getRuntimeSettings();
+  const { homeserver } = getRuntimeSettings();
+  const oidcIssuer = runtimeOidcIssuer();
   const authMetadata = await discoverOidcIssuer(homeserver);
   if (authMetadata.issuer !== oidcIssuer) {
     throw new Error("OIDC issuer does not match runtime settings");
@@ -96,14 +96,6 @@ export async function beginOidcLogin(): Promise<void> {
   window.location.href = url;
 }
 
-/** True if the current URL looks like an OIDC authorization-code callback
- * (`?code=...&state=...`). Checked on app load before falling back to a
- * previously-saved session. */
-export function isOidcCallback(): boolean {
-  const params = new URLSearchParams(window.location.search);
-  return params.has("code") && params.has("state");
-}
-
 /**
  * Completes the authorization-code exchange from the current URL's
  * `?code&state`, confirms identity via `/whoami`, and clears the query
@@ -127,7 +119,8 @@ export async function completeOidcLoginFromCallback(): Promise<Session> {
   // handling the returned session so an error cannot leave them on reload.
   window.history.replaceState({}, "", window.location.pathname);
 
-  const { homeserver, oidcIssuer } = getRuntimeSettings();
+  const { homeserver } = getRuntimeSettings();
+  const oidcIssuer = runtimeOidcIssuer();
   if (homeserverUrl !== homeserver) {
     throw new Error("OIDC callback homeserver does not match runtime settings");
   }
@@ -157,7 +150,6 @@ export async function completeOidcLoginFromCallback(): Promise<Session> {
     deviceId,
     accessToken: tokenResponse.access_token,
     refreshToken: tokenResponse.refresh_token,
-    oidcIssuer: oidcClientSettings.issuer,
     oidcClientId: oidcClientSettings.clientId,
   };
 }

@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { registerE2eUser } from "./testUsers";
 import {
-  createFolder,
+  createVault,
   downloadFileBytes,
   joinFolder,
   loginViaUI,
-  openFolderByName,
+  openVaultByName,
   uploadFile,
 } from "./uiHelpers";
 
@@ -25,8 +25,8 @@ test("multi-participant share: userA and userB exchange a file", async ({ browse
 
   try {
     await loginViaUI(pageA, userA);
-    const folderId = await createFolder(pageA, "Team Folder");
-    await openFolderByName(pageA, "Team Folder");
+    const folderId = await createVault(pageA, "Team Folder");
+    await openVaultByName(pageA, "Team Folder");
 
     await pageA.getByTestId("share-user-id").fill(userB.userId);
     await pageA.getByTestId("share-role").selectOption("editor");
@@ -39,7 +39,7 @@ test("multi-participant share: userA and userB exchange a file", async ({ browse
     // the folder by the ID userA's session exposed in the DOM, and upload.
     await loginViaUI(pageB, userB);
     await joinFolder(pageB, folderId, "Team Folder");
-    await openFolderByName(pageB, "Team Folder");
+    await openVaultByName(pageB, "Team Folder");
 
     const bobBytes = Buffer.from("hello from userB's editor upload\n".repeat(20));
     await uploadFile(pageB, "from-b.txt", "text/plain", bobBytes);

@@ -3,8 +3,7 @@ import { getRuntimeSettings } from "../lib/buildConfig";
 
 export function LoginScreen() {
   const { loginWithOidc, error, status } = useStorage();
-  // The product always uses MAS/OIDC. A local development server can be
-  // selected explicitly, but password compatibility authentication is never
+  // The product always uses MAS/OIDC; password authentication is never
   // exposed by this client.
   const busy = status === "connecting";
 

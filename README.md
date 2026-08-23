@@ -1,25 +1,25 @@
 # storage.telecrypt.io
 
 The static React/Vite site served at [storage.telecrypt.io](https://storage.telecrypt.io).
-It uses the exact published `@telecrypt-io/storage@0.2.13` browser library; storage protocol,
+It uses the exact published `@telecrypt-io/storage@0.3.0` browser library; storage protocol,
 cryptography, and the command-line client deliberately live in their own repositories.
 
 ## Source boundaries
 
-- [`storage-sdk`](https://github.com/TeleCrypt-io/storage-sdk) owns the library source and future package releases.
-- [`storage-cli`](https://github.com/TeleCrypt-io/storage-cli) owns the CLI migration source.
+- [`storage-sdk`](https://github.com/TeleCrypt-io/storage-sdk) owns the library source and package releases.
+- [`storage-cli`](https://github.com/TeleCrypt-io/storage-cli) owns the command-line client.
 - This repository owns only the static website, its UI tests, and its GitHub Pages deployment.
 
 ## Security boundaries
 
 The web client uses MAS/OIDC authorization-code + PKCE only; it never collects or sends a Matrix
-compatibility-login password. GitHub Pages cannot set response headers, so `index.html` provides an
+login password. GitHub Pages cannot set response headers, so `index.html` provides an
 early CSP meta policy as a baseline. A header CSP remains required when the static site moves behind
 a header-capable edge. Vite relaxes only `connect-src` for its development server so the disposable
 localhost MAS/Synapse fixture remains usable. Production and preproduction runtime settings are
 served from the public `runtime-settings.json` file; the compiled JS and CSS assets do not embed
-either endpoint. The settings file is validated before the UI renders: both endpoints must be
-canonical HTTPS TeleCrypt URLs, and the homeserver and issuer must share an origin. The same exact
+the backend origin. The settings file is validated before the UI renders: it must be a canonical
+HTTPS TeleCrypt backend URL. The OIDC issuer is derived from that backend origin. The same exact
 compiled JS, CSS, and other application assets can therefore be served in both environments. The
 public settings file is separate environment configuration and is expected to differ.
 
@@ -28,7 +28,7 @@ public settings file is separate environment configuration and is expected to di
 `src/vendor/telecrypt-ui/product.css` is an exact local vendor copy of the
 canonical shared UI stylesheet. `src/theme.css` imports it directly, keeping
 this repository self-contained without a runtime package dependency. The
-vendor `PROVENANCE.json` records the exact `TeleCrypt-io/ui` release and commit,
+vendor `PROVENANCE.json` records the exact `TeleCrypt-io/ui-shared-css` release and commit,
 Storage baseline, and content hash.
 
 ## Development and checks
@@ -38,10 +38,12 @@ npm ci
 npm run dev       # http://localhost:5173
 npm run lint
 npm test          # component/wiring tests; no browser Harness execution in CI
-npm run build
+npm exec -- tsc -b --noEmit
 ```
 
-Browser acceptance tooling is operator-local Harness work, never a GitHub Actions job.
+Browser acceptance tooling is operator-local Harness work, never a GitHub Actions job. Its real
+browser suite expects the shared disposable Synapse/MAS fixture to be running on localhost before
+`npm run e2e`; this repository does not carry or duplicate that fixture.
 
 ## Releases and deployment
 
