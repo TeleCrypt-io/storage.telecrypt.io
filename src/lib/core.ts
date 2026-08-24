@@ -113,8 +113,8 @@ export const buildTokenRefreshFunction = sdkCore.buildTokenRefreshFunction as un
   expiry?: Date;
 }>;
 
-const sdkFileLimit = (sdkCore as unknown as { MAX_FILE_BYTES?: unknown }).MAX_FILE_BYTES;
+const sdkFileLimit = (sdkCore as unknown as { MAX_MEDIA_FILE_BYTES?: unknown }).MAX_MEDIA_FILE_BYTES;
 if (typeof sdkFileLimit !== "number" || !Number.isSafeInteger(sdkFileLimit) || sdkFileLimit <= 0) {
   throw new Error("The installed storage SDK does not export its authoritative file limit");
 }
-export const MAX_FILE_BYTES = sdkFileLimit;
+export const MAX_MEDIA_FILE_BYTES = sdkFileLimit;

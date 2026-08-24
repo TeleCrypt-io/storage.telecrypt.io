@@ -1,6 +1,6 @@
-import { MAX_FILE_BYTES } from "./core";
+import { MAX_MEDIA_FILE_BYTES } from "./core";
 
-export const MAX_FILE_SIZE_BYTES = MAX_FILE_BYTES;
+export const MAX_FILE_SIZE_BYTES = MAX_MEDIA_FILE_BYTES;
 export const FILE_TOO_LARGE_ERROR = "File exceeds the 128 MiB limit";
 export const MAX_UPLOAD_FILES = 128;
 export const MAX_UPLOAD_BATCH_BYTES = 256 * 1024 * 1024;

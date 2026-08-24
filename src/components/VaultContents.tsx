@@ -549,7 +549,7 @@ export function VaultContents({
   }
 
   async function handleDeleteSubfolder(subId: string) {
-    if (!confirm("Delete this folder and everything inside it?")) return;
+    if (!confirm("Delete this empty folder? Delete its files and child folders first.")) return;
     const operation = captureMutation();
     if (!operation) return;
     setBusy(true);

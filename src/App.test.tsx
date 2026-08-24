@@ -224,6 +224,16 @@ describe("formatOperationError", () => {
         }),
       ),
     ).toBe("The recovery key was rejected.");
+    expect(
+      formatOperationError(Object.assign(new Error("cannot delete a nonempty vault or folder"), {
+        code: "NON_EMPTY_TREE",
+      })),
+    ).toBe("Delete all files and empty child folders before deleting this vault or folder.");
+    expect(
+      formatOperationError(Object.assign(new Error("delete file failed after partial completion"), {
+        code: "MUTATION_PARTIAL",
+      })),
+    ).toBe("Deletion completed only partially. Refresh and retry to finish cleanup.");
   });
 });
 

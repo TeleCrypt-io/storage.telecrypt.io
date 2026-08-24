@@ -36,6 +36,12 @@ export function formatOperationError(err: unknown): string {
   if (code === "FILE_TOO_LARGE" || /file exceeds the 128 MiB limit/i.test(msg)) {
     return "File exceeds the 128 MiB limit.";
   }
+  if (code === "NON_EMPTY_TREE" || /nonempty vault or folder/i.test(msg)) {
+    return "Delete all files and empty child folders before deleting this vault or folder.";
+  }
+  if (code === "MUTATION_PARTIAL" || /partial completion|cleanup stopped/i.test(msg)) {
+    return "Deletion completed only partially. Refresh and retry to finish cleanup.";
+  }
   if (msg === "File size could not be verified.") return msg;
   if (/timed out/i.test(msg)) return "Connection timed out";
   if (/cancel(?:led|ed)/i.test(msg)) return "Operation cancelled";

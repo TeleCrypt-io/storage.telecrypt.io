@@ -301,7 +301,7 @@ export function FileManager() {
       mutationInflightRef.current
     ) return;
     if (!core.isVaultOwner(expectedStorage, vault.id)) return;
-    if (!confirm(`Delete vault "${vault.name}" and everything inside it?`)) return;
+    if (!confirm(`Delete empty vault "${vault.name}"? Delete its files and child folders first.`)) return;
     mutationInflightRef.current = true;
     setBusy(true);
     setError(null);
