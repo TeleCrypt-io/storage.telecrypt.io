@@ -100,11 +100,11 @@ jobs:
           record_id="$(jq -er --arg name "$sdk_record_name" '.assets[] | select(.name==$name) | .id | select(type=="number" and .>0 and floor==.)' "$sdk_release")"
           record_size="$(jq -er --arg name "$sdk_record_name" '.assets[] | select(.name==$name) | .size | select(type=="number" and .>0 and floor==.)' "$sdk_release")"
           record_digest="$(jq -er --arg name "$sdk_record_name" '.assets[] | select(.name==$name) | .digest | select(type=="string" and test("^sha256:[0-9a-f]{64}$"))' "$sdk_release")"
-          python3 scripts/bounded-command.py --stdout "$sdk_record.stdout" --stderr "$sdk_record.err" --max-stdout-bytes 131072 --max-stderr-bytes 131072 --timeout-seconds 120 --kill-after-seconds 5 -- gh api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Accept: application/octet-stream' --output "$sdk_record" "repos/TeleCrypt-io/storage-sdk/releases/assets/$record_id"
-          test "$(wc -c <"$sdk_record")" = "$record_size" -a "sha256:$(sha256sum "$sdk_record" | awk '{print $1}')" = "$record_digest" -a ! -s "$sdk_record.err" -a ! -s "$sdk_record.stdout"
+          python3 scripts/bounded-command.py --stdout "$sdk_record" --stderr "$sdk_record.err" --max-stdout-bytes 104857600 --max-stderr-bytes 131072 --timeout-seconds 120 --kill-after-seconds 5 -- gh api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Accept: application/octet-stream' "repos/TeleCrypt-io/storage-sdk/releases/assets/$record_id"
+          test "$(wc -c <"$sdk_record")" = "$record_size" -a "sha256:$(sha256sum "$sdk_record" | awk '{print $1}')" = "$record_digest" -a ! -s "$sdk_record.err"
           archive_id="$(jq -er --arg name "$sdk_archive_name" '.assets[] | select(.name==$name) | .id | select(type=="number" and .>0 and floor==.)' "$sdk_release")"
-          python3 scripts/bounded-command.py --stdout "$sdk_archive.stdout" --stderr "$sdk_archive.err" --max-stdout-bytes 131072 --max-stderr-bytes 131072 --timeout-seconds 120 --kill-after-seconds 5 -- gh api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Accept: application/octet-stream' --output "$sdk_archive" "repos/TeleCrypt-io/storage-sdk/releases/assets/$archive_id"
-          test ! -s "$sdk_archive.err" -a ! -s "$sdk_archive.stdout"
+          python3 scripts/bounded-command.py --stdout "$sdk_archive" --stderr "$sdk_archive.err" --max-stdout-bytes 104857600 --max-stderr-bytes 131072 --timeout-seconds 120 --kill-after-seconds 5 -- gh api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Accept: application/octet-stream' "repos/TeleCrypt-io/storage-sdk/releases/assets/$archive_id"
+          test ! -s "$sdk_archive.err"
           test "$(jq -er '.commit' "$sdk_record")" = "$(jq -er '.target_commitish' "$sdk_release")"
           node scripts/verify-storage-sdk-lock.mjs "$sdk_record" "$sdk_archive"
           test "$(head -n 1 LICENSE)" = "Business Source License 1.1"
@@ -161,9 +161,10 @@ jobs:
           printf 'pages_digest=sha256:%s\npages_size=%s\n' "$(sha256sum "release-assets/$archive" | awk '{print $1}')" "$size" >>"$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7.0.1
         with:
-          name: storage-pages-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          name: storage-pages-${{ github.run_id }}-${{ github.sha }}
           path: release-assets/*.pages.zip
           if-no-files-found: error
+          overwrite: true
           retention-days: 7
 
   release:
@@ -183,7 +184,7 @@ jobs:
         with: {fetch-depth: 0, persist-credentials: false}
       - uses: actions/download-artifact@v8.0.1
         with:
-          name: storage-pages-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          name: storage-pages-${{ github.run_id }}-${{ github.sha }}
           path: release-assets
       - name: Create or reuse the exact draft Release
         id: publish
@@ -275,11 +276,11 @@ jobs:
             asset_id="$(jq -er '.assets[0].id | select(type=="number" and .>0 and floor==.)' "$json")"
             error="$output.err"
             set +e
-            python3 scripts/bounded-command.py --stdout "$output.stdout" --stderr "$error" --max-stdout-bytes 131072 --max-stderr-bytes 131072 --timeout-seconds 120 --kill-after-seconds 5 -- gh api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Accept: application/octet-stream' --output "$output" "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+            python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 16777216 --max-stderr-bytes 131072 --timeout-seconds 120 --kill-after-seconds 5 -- gh api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
             status="$?"
             set -e
             test "$status" = 0
-            test "$(wc -c <"$error")" -le 131072 -a ! -s "$error" -a ! -s "$output.stdout"
+            test "$(wc -c <"$error")" -le 131072 -a ! -s "$error"
             test "$(wc -c <"$output")" = "$EXPECTED_SIZE"
            test "sha256:$(sha256sum "$output" | awk '{print $1}')" = "$EXPECTED_DIGEST"
            cmp -s "$archive" "$output"
@@ -326,7 +327,10 @@ jobs:
               done <"$asset_ids"
               asset_name="storage-web-${RELEASE_TAG#storage-web-v}.pages.zip"
               verify_source
-              bounded_gh "$RUNNER_TEMP/upload.json" api --hostname github.com --method POST --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Content-Type: application/zip' --input "$archive" "/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset_name"
+              upload_url="$(jq -er '.upload_url | select(type=="string" and test("^https://uploads\\.github\\.com/repos/[^/]+/[^/]+/releases/[0-9]+/assets\\{\\?name,label\\}$"))' "$probe")"
+              upload_url="${upload_url%\{*}"
+              test "$upload_url" = "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets"
+              bounded_gh "$RUNNER_TEMP/upload.json" api --hostname github.com --method POST --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/zip' --input "$archive" "$upload_url?name=$asset_name"
               bounded_gh "$probe" api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' "/repos/$GITHUB_REPOSITORY/releases/$release_id"
               verify_draft "$probe" "$release_id"
               jq -e --arg name "$asset_name" --arg digest "$EXPECTED_DIGEST" --argjson size "$EXPECTED_SIZE" '((.assets|length)==1) and .assets[0].name==$name and .assets[0].state=="uploaded" and .assets[0].size==$size and .assets[0].digest==$digest' "$probe" >/dev/null
@@ -403,11 +407,11 @@ jobs:
           asset_id="$(jq -er '.assets[0].id | select(type=="number" and .>0 and floor==.)' "$json")"
           downloaded="$RUNNER_TEMP/$archive"
           set +e
-          python3 scripts/bounded-command.py --stdout "$downloaded.stdout" --stderr "$downloaded.err" --max-stdout-bytes 131072 --max-stderr-bytes 131072 --timeout-seconds 120 --kill-after-seconds 5 -- gh api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Accept: application/octet-stream' --output "$downloaded" "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+          python3 scripts/bounded-command.py --stdout "$downloaded" --stderr "$downloaded.err" --max-stdout-bytes 16777216 --max-stderr-bytes 131072 --timeout-seconds 120 --kill-after-seconds 5 -- gh api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' --header 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
           status="$?"
           set -e
           test "$status" = 0
-          test "$(wc -c <"$downloaded.err")" -le 131072 -a ! -s "$downloaded.err" -a ! -s "$downloaded.stdout"
+          test "$(wc -c <"$downloaded.err")" -le 131072 -a ! -s "$downloaded.err"
           test "$(wc -c <"$downloaded")" = "$EXPECTED_SIZE"
           test "sha256:$(sha256sum "$downloaded" | awk '{print $1}')" = "$EXPECTED_DIGEST"
           bounded_local "$RUNNER_TEMP/storage-archive-validate.out" 300 python3 scripts/validate-pages-archive.py "$downloaded"

@@ -14,7 +14,7 @@ bounded_command() {
   shift 2
   python3 scripts/bounded-command.py \
     --stdout "$output" --stderr "$error" \
-    --max-stdout-bytes 1048576 --max-stderr-bytes 524288 \
+    --max-stdout-bytes 104857600 --max-stderr-bytes 524288 \
     --timeout-seconds 120 --kill-after-seconds 5 -- "$@"
   test ! -s "$error"
 }
@@ -42,8 +42,9 @@ asset_digest="$(jq -er '.assets[0].digest' "$release_json")"
 archive="$temporary_dir/$ui_asset"
 bounded_command "$archive.stdout" "$archive.stderr" \
   gh api --hostname github.com --header 'Accept: application/octet-stream' \
-  --header 'X-GitHub-Api-Version: 2026-03-10' --output "$archive" \
+  --header 'X-GitHub-Api-Version: 2026-03-10' \
   "repos/TeleCrypt-io/ui-shared-css/releases/assets/$asset_id"
-test ! -s "$archive.stdout" -a "$(wc -c <"$archive")" = "$asset_size"
+mv -- "$archive.stdout" "$archive"
+test "$(wc -c <"$archive")" = "$asset_size"
 test "sha256:$(sha256sum "$archive" | awk '{print $1}')" = "$asset_digest"
 node scripts/verify-provenance.mjs "$release_json" "$archive"

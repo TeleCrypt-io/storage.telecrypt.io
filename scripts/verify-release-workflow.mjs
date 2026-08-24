@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 // below cover the remote outcomes that must be distinguished before mutation.
 const workflow = readFileSync(".github/workflows/release-ui.yml", "utf8");
 const verify = readFileSync(".github/workflows/verify.yml", "utf8");
+const sharedUiRelease = readFileSync("scripts/verify-shared-ui-release.sh", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 if (readFileSync(".node-version", "utf8").trim() !== "22.23.2" || packageJson.packageManager !== "npm@10.9.8" || packageJson.engines?.node !== ">=22.23.2") throw new Error("Node/npm toolchain policy is not encoded exactly");
 
@@ -104,7 +105,7 @@ const build = job("build");
 const releaseShell = step(release, "Create or reuse the exact draft Release");
 const packageShell = step(build, "Package the deterministic Pages artifact");
 const deployVerifyShell = step(deploy, "Download and verify the immutable Release artifact");
-  for (const fragment of [
+for (const fragment of [
   "refs/tags/$RELEASE_TAG:refs/remotes/origin/release-tag", "refs/heads/main:refs/remotes/origin/main",
   "git cat-file -t refs/remotes/origin/release-tag", "git merge-base --is-ancestor",
   "https://github.com/${GITHUB_REPOSITORY}.git", "--no-includes", "--name-only", "protocol.file.allow=never",
@@ -113,6 +114,10 @@ const deployVerifyShell = step(deploy, "Download and verify the immutable Releas
   "--field draft=true", "target_commitish=$RELEASE_SHA", "--method DELETE", "--input \"$archive\"", "Accept: application/octet-stream",
   "cmp -s \"$archive\"", "--method PATCH", "--field draft=false", "GITHUB_RUN_ATTEMPT",
 ]) if (!releaseShell.includes(fragment)) throw new Error(`release state machine is missing ${fragment}`);
+if (workflow.includes("github.run_attempt")) throw new Error("artifact names vary across reruns");
+if (!workflow.includes("name: storage-pages-${{ github.run_id }}-${{ github.sha }}") || !workflow.includes("overwrite: true")) throw new Error("Pages artifact reruns are not stable and overwritable");
+if ([workflow, verify, sharedUiRelease].some((text) => text.includes("--output"))) throw new Error("binary downloads still use unsupported gh api --output");
+if (!releaseShell.includes("upload_url") || !releaseShell.includes("uploads.github.com") || !releaseShell.includes('"$upload_url?name=$asset_name"')) throw new Error("Release asset upload does not use the authoritative uploads.github.com URL");
 for (const fragment of ["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_PARAMETERS", "GH_HOST: github.com", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]) {
   if (!workflow.includes(fragment)) throw new Error(`transport hardening is missing ${fragment}`);
 }
