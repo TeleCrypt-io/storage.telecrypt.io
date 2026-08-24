@@ -8,7 +8,13 @@ export interface RuntimeSettings {
   serverName: string;
 }
 
-const STORAGE_HOST_PATTERN = /^storage(?:\.(stage))?\.telecrypt\.io$/;
+const STORAGE_ENVIRONMENTS = new Map<string, RuntimeSettings>([
+  ["storage.telecrypt.io", { homeserver: "https://backend.telecrypt.io", serverName: "telecrypt.io" }],
+  [
+    "storage.stage.telecrypt.io",
+    { homeserver: "https://backend.stage.telecrypt.io", serverName: "stage.telecrypt.io" },
+  ],
+]);
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const DEVELOPMENT_HOMESERVER = "http://localhost:8008";
 
@@ -26,6 +32,7 @@ function deriveRuntimeSettings(origin: string, development: boolean): RuntimeSet
     page.protocol === "http:" &&
     page.username === "" &&
     page.password === "" &&
+    origin === page.origin &&
     LOOPBACK_HOSTS.has(hostname)
   ) {
     // The disposable Matrix fixture is configured with the canonical `localhost`
@@ -36,19 +43,17 @@ function deriveRuntimeSettings(origin: string, development: boolean): RuntimeSet
     page.protocol !== "https:" ||
     page.username !== "" ||
     page.password !== "" ||
-    page.port !== ""
+    page.port !== "" ||
+    origin !== page.origin
   ) {
     throw new Error("Storage page must use canonical HTTPS TeleCrypt hosting");
   }
 
-  const match = hostname.match(STORAGE_HOST_PATTERN);
-  if (!match) {
+  const environment = STORAGE_ENVIRONMENTS.get(hostname);
+  if (!environment) {
     throw new Error("Storage page host is not an allowed TeleCrypt environment");
   }
-  return {
-    homeserver: `https://backend${match[1] ? `.${match[1]}` : ""}.telecrypt.io`,
-    serverName: `${match[1] ? `${match[1]}.` : ""}telecrypt.io`,
-  };
+  return environment;
 }
 
 export function runtimeOidcIssuer(): string {

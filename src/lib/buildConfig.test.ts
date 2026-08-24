@@ -31,6 +31,9 @@ describe("page-bound environment", () => {
 
     setOrigin("http://127.0.0.1:5173");
     expect(getRuntimeSettings()).toEqual({ homeserver: "http://localhost:8008", serverName: "localhost" });
+
+    setOrigin("http://[::1]:5173");
+    expect(getRuntimeSettings()).toEqual({ homeserver: "http://localhost:8008", serverName: "localhost" });
   });
 
   it.each([
@@ -43,6 +46,7 @@ describe("page-bound environment", () => {
     "https://storage-stage.telecrypt.io",
     "http://storage.telecrypt.io",
     "https://storage.telecrypt.io:8443",
+    "https://storage.telecrypt.io:443",
     "http://user@localhost:5173",
   ])("rejects an unapproved page origin: %s", async (origin) => {
     setOrigin(origin);
