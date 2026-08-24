@@ -113,7 +113,9 @@ export const buildTokenRefreshFunction = sdkCore.buildTokenRefreshFunction as un
   expiry?: Date;
 }>;
 
-const sdkFileLimit = (sdkCore as unknown as { MAX_MEDIA_FILE_BYTES?: unknown }).MAX_MEDIA_FILE_BYTES;
+// Reflective lookup keeps the browser bundle from treating the export as a
+// statically missing symbol while the local checkout is waiting for SDK 0.5.0.
+const sdkFileLimit = Reflect.get(sdkCore, "MAX_MEDIA_FILE_BYTES");
 if (typeof sdkFileLimit !== "number" || !Number.isSafeInteger(sdkFileLimit) || sdkFileLimit <= 0) {
   throw new Error("The installed storage SDK does not export its authoritative file limit");
 }
