@@ -85,7 +85,7 @@ jobs:
             test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288
             test "$status" = 0
             test ! -s "$error"
-            ! rg -qi '\bwarn(ing)?\b' "$output" "$error"
+            ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"
           }
           test "$(node --version)" = "v22.23.2"
           test "$(npm --version)" = "10.9.8"
@@ -101,41 +101,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! rg -qi '\bwarn(ing)?\b' "$output" "$error"; }
+          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"; }
           bounded_command "$RUNNER_TEMP/storage-lint.out" 300 npm run lint --loglevel=error
 
       - name: Verify security policy contract
         shell: bash
         run: |
           set -euo pipefail
-          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! rg -qi '\bwarn(ing)?\b' "$output" "$error"; }
+          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"; }
           bounded_command "$RUNNER_TEMP/storage-verify-security.out" 300 npm run verify:security --loglevel=error
 
       - name: Unit tests
         shell: bash
         run: |
           set -euo pipefail
-          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! rg -qi '\bwarn(ing)?\b' "$output" "$error"; }
+          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"; }
           bounded_command "$RUNNER_TEMP/storage-test.out" 600 npm test --loglevel=error
 
       - name: Test Pages archive validation
         shell: bash
         run: |
           set -euo pipefail
-          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! rg -qi '\bwarn(ing)?\b' "$output" "$error"; }
+          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds 300 --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"; }
           bounded_command "$RUNNER_TEMP/storage-verify-archive.out" 300 npm run verify:archive --loglevel=error
 
       - name: Build
         shell: bash
         run: |
           set -euo pipefail
-          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! rg -qi '\bwarn(ing)?\b' "$output" "$error"; }
+          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"; }
           bounded_command "$RUNNER_TEMP/storage-build.out" 600 npm run build --loglevel=error
 
       - name: Verify Pages packaging
         shell: bash
         run: |
           set -euo pipefail
-          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds "$seconds" --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! rg -qi '\bwarn(ing)?\b' "$output" "$error"; }
+          bounded_command() { local output="$1" seconds="$2" status error; shift 2; error="$output.err"; set +e; python3 scripts/bounded-command.py --stdout "$output" --stderr "$error" --max-stdout-bytes 1048576 --max-stderr-bytes 524288 --timeout-seconds 300 --kill-after-seconds 5 -- "$@"; status="$?"; set -e; test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288; test "$status" = 0; test ! -s "$error"; ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"; }
           bounded_command "$RUNNER_TEMP/storage-verify-package.out" 300 npm run verify:package --loglevel=error
           PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-bounded-command.py

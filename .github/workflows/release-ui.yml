@@ -123,7 +123,7 @@ jobs:
             test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288
             test "$status" = 0
             test ! -s "$error"
-            ! rg -qi '\bwarn(ing)?\b' "$output" "$error"
+            ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"
           }
           bounded_command "$RUNNER_TEMP/storage-npm-ci.out" 600 npm ci --ignore-scripts --no-fund --no-audit --loglevel=error
           bounded_command "$RUNNER_TEMP/storage-verify-security.out" 300 npm run verify:security --loglevel=error
@@ -151,7 +151,7 @@ jobs:
             test "$(wc -c <"$output")" -le 1048576 -a "$(wc -c <"$error")" -le 524288
             test "$status" = 0
             test ! -s "$error"
-            ! rg -qi '\bwarn(ing)?\b' "$output" "$error"
+            ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"
           }
           bounded_package "$RUNNER_TEMP/storage-package-pages.out" 300 bash scripts/package-pages.sh dist "release-assets/$archive" "$(git show -s --format=%ct "$RELEASE_SHA")"
           bounded_package "$RUNNER_TEMP/storage-package-validate.out" 300 python3 scripts/validate-pages-archive.py "release-assets/$archive"
@@ -252,7 +252,7 @@ jobs:
             test "$(wc -c <"$output")" -le 131072 -a "$(wc -c <"$error")" -le 131072
             test "$status" = 0
             test ! -s "$error"
-            ! rg -qi '\bwarn(ing)?\b' "$output" "$error"
+            ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"
           }
           verify_draft() {
             local json="$1" id="$2"
@@ -388,7 +388,7 @@ jobs:
             test "$(wc -c <"$output")" -le 131072 -a "$(wc -c <"$error")" -le 131072
             test "$status" = 0
             test ! -s "$error"
-            ! rg -qi '\bwarn(ing)?\b' "$output" "$error"
+            ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"
           }
           json="$RUNNER_TEMP/release.json"
           error="$json.err"
