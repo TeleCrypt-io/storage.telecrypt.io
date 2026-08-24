@@ -19,7 +19,7 @@ vi.mock("./lib/core", async () => {
     discoverOidcIssuer: vi.fn(),
     listVaults: vi.fn(),
     listPendingInvites: vi.fn(),
-    getMyVaultRole: vi.fn(),
+    isVaultOwner: vi.fn(),
     createVault: vi.fn(),
     joinVault: vi.fn(),
     declineInvite: vi.fn(),
@@ -151,7 +151,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   vi.clearAllMocks();
-  vi.mocked(core.getMyVaultRole).mockReturnValue("owner");
+  vi.mocked(core.isVaultOwner).mockReturnValue(true);
   vi.mocked(core.listPendingInvites).mockResolvedValue([]);
   vi.mocked(core.getFileDetails).mockResolvedValue({
     name: "file.txt",
@@ -331,12 +331,17 @@ describe("login", () => {
             token_type: "Bearer",
             access_token: "access-rotated",
             refresh_token: "refresh-rotated",
+            scope: "urn:matrix:client:api:* urn:matrix:client:device:DEVICE1",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ token_type: "Bearer", access_token: "access-later" }), {
+        new Response(JSON.stringify({
+          token_type: "Bearer",
+          access_token: "access-later",
+          scope: "urn:matrix:client:api:* urn:matrix:client:device:DEVICE1",
+        }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -418,6 +423,8 @@ describe("login", () => {
     await waitFor(() =>
       expect(revocation.revokeMatrixSession).toHaveBeenCalledWith(
         expect.objectContaining({ homeserver: SESSION.homeserver, accessToken: SESSION.accessToken }),
+        undefined,
+        expect.any(AbortSignal),
       ),
     );
     expect(await screen.findByTestId("auth-error")).toHaveTextContent(
@@ -562,7 +569,7 @@ describe("vaults", () => {
   });
 
   it("hides destructive vault controls from non-owners", async () => {
-    vi.mocked(core.getMyVaultRole).mockReturnValue("viewer");
+    vi.mocked(core.isVaultOwner).mockReturnValue(false);
     await loginAndReachVaults([{ id: "!shared:localhost", name: "Shared" }]);
 
     const item = screen.getByTestId("vault-item");
@@ -571,7 +578,7 @@ describe("vaults", () => {
   });
 
   it("hides access mutations from non-owners", async () => {
-    vi.mocked(core.getMyVaultRole).mockReturnValue("viewer");
+    vi.mocked(core.isVaultOwner).mockReturnValue(false);
     await openVault("Shared", {
       members: [{ userId: "@bob:localhost", role: "viewer", membership: "join" }],
     });
@@ -586,7 +593,7 @@ describe("vaults", () => {
 
   it("rechecks ownership before an already-rendered access mutation", async () => {
     let role = "owner";
-    vi.mocked(core.getMyVaultRole).mockImplementation(() => role);
+    vi.mocked(core.isVaultOwner).mockImplementation(() => role === "owner");
     const user = await openVault("Shared", {
       members: [{ userId: "@bob:localhost", role: "viewer", membership: "join" }],
     });

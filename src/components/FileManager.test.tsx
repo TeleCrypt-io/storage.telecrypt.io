@@ -16,7 +16,7 @@ vi.mock("../lib/core", async () => {
     ...actual,
     listVaults: vi.fn(),
     listPendingInvites: vi.fn(),
-    getMyVaultRole: vi.fn(),
+    isVaultOwner: vi.fn(),
     createVault: vi.fn(),
     listFiles: vi.fn(),
     listSubfolders: vi.fn(),
@@ -57,7 +57,7 @@ const useStorageMock = vi.mocked(useStorage);
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(core.listPendingInvites).mockResolvedValue([]);
-  vi.mocked(core.getMyVaultRole).mockReturnValue("owner");
+  vi.mocked(core.isVaultOwner).mockReturnValue(true);
   vi.mocked(core.listFiles).mockResolvedValue([]);
   vi.mocked(core.listSubfolders).mockResolvedValue([]);
   vi.mocked(core.listMembers).mockResolvedValue([]);
@@ -151,7 +151,7 @@ describe("FileManager refresh identity", () => {
     await flush();
 
     expect(screen.getByTestId("rename-vault")).toBeInTheDocument();
-    vi.mocked(core.getMyVaultRole).mockImplementation(() => {
+    vi.mocked(core.isVaultOwner).mockImplementation(() => {
       throw new Error("role unavailable");
     });
 
@@ -168,7 +168,7 @@ describe("FileManager refresh identity", () => {
   it("does not delete a vault after an owner role is revoked while its control is open", async () => {
     const storage = fakeStorage("shared");
     let role = "owner";
-    vi.mocked(core.getMyVaultRole).mockImplementation(() => role);
+    vi.mocked(core.isVaultOwner).mockImplementation(() => role === "owner");
     vi.mocked(core.listVaults).mockResolvedValue([{ id: "!vault:localhost", name: "Shared" }]);
     vi.mocked(core.deleteVault).mockResolvedValue({ id: "!vault:localhost", deleted: true });
     useStorageMock.mockReturnValue({ storage } as never);
@@ -188,7 +188,7 @@ describe("FileManager refresh identity", () => {
     const storage = fakeStorage("shared");
     const deletion = deferred<{ id: string; deleted: true }>();
     let role = "owner";
-    vi.mocked(core.getMyVaultRole).mockImplementation(() => role);
+    vi.mocked(core.isVaultOwner).mockImplementation(() => role === "owner");
     vi.mocked(core.listVaults).mockResolvedValue([{ id: "!vault:localhost", name: "Shared" }]);
     vi.mocked(core.deleteVault).mockReturnValue(deletion.promise);
     useStorageMock.mockReturnValue({ storage } as never);

@@ -307,7 +307,11 @@ export function StorageProvider({ children }: { children: ReactNode }) {
                 throw new Error("OIDC refresh token is invalid or too large");
               }
               if (gen !== connectGenRef.current) throw new Error("Session is no longer active");
-              return tokenRefreshFunction(refreshToken, refreshSignal ?? abortController.signal);
+              // `abortController` belongs to the one-time bootstrap. It is closed as soon as
+              // the client is ready, so reusing it would make every later refresh fail as
+              // cancelled. Matrix supplies a per-refresh signal when it needs cancellation;
+              // otherwise the SDK owns its bounded request timeout.
+              return tokenRefreshFunction(refreshToken, refreshSignal);
             };
             log("Building encrypted client (OIDC session)…");
             client = await core.TeleCryptIOStorage.createFromOidc({

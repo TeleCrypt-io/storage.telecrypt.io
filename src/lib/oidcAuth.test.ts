@@ -174,6 +174,8 @@ describe("beginOidcLogin stable device id", () => {
         homeserver: getRuntimeSettings().homeserver,
         accessToken: "old-access",
       }),
+      undefined,
+      undefined,
     );
     expect(sessionStorage.getItem("telecrypt-io-ui:session")).toBeNull();
   });
@@ -260,7 +262,7 @@ describe("beginOidcLogin stable device id", () => {
     expect(revocation.revokeMatrixSession).toHaveBeenCalledWith({
       homeserver: getRuntimeSettings().homeserver,
       accessToken: "old-access",
-    });
+    }, undefined, undefined);
     expect(sessionStorage.getItem("telecrypt-io-ui:pending-revocation")).toBeNull();
   });
 
@@ -367,7 +369,7 @@ describe("beginOidcLogin stable device id", () => {
     expect(revocation.revokeMatrixSession).toHaveBeenCalledWith({
       homeserver: getRuntimeSettings().homeserver,
       accessToken: "new-access",
-    });
+    }, undefined, undefined);
   });
 
   it("rejects a callback when whoami omits the granted device identity", async () => {
@@ -389,7 +391,7 @@ describe("beginOidcLogin stable device id", () => {
     expect(revocation.revokeMatrixSession).toHaveBeenCalledWith({
       homeserver: getRuntimeSettings().homeserver,
       accessToken: "new-access",
-    });
+    }, undefined, undefined);
   });
 
   it("rejects callback bearer tokens containing whitespace before whoami", async () => {
@@ -428,7 +430,7 @@ describe("beginOidcLogin stable device id", () => {
     expect(revocation.revokeMatrixSession).toHaveBeenCalledWith({
       homeserver: getRuntimeSettings().homeserver,
       accessToken: "new-access",
-    });
+    }, undefined, undefined);
   });
 
   it("retains a tab-scoped revocation retry when callback cleanup is uncertain", async () => {
@@ -507,7 +509,17 @@ describe("beginOidcLogin stable device id", () => {
     });
 
     await beginOidcLogin();
-    expect(revocation.revokeMatrixSession).toHaveBeenNthCalledWith(1, expect.objectContaining({ accessToken: "old-access" }));
-    expect(revocation.revokeMatrixSession).toHaveBeenNthCalledWith(2, expect.objectContaining({ accessToken: "rotated-access" }));
+    expect(revocation.revokeMatrixSession).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ accessToken: "old-access" }),
+      undefined,
+      undefined,
+    );
+    expect(revocation.revokeMatrixSession).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ accessToken: "rotated-access" }),
+      undefined,
+      undefined,
+    );
   });
 });

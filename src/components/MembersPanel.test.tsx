@@ -13,7 +13,7 @@ vi.mock("../lib/core", async () => {
   const actual = await vi.importActual<typeof import("../lib/core")>("../lib/core");
   return {
     ...actual,
-    getMyVaultRole: vi.fn(),
+    isVaultOwner: vi.fn(),
     getVaultDetails: vi.fn(),
     listMembers: vi.fn(),
     shareVault: vi.fn(),
@@ -38,7 +38,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(core.getMyVaultRole).mockReturnValue("owner");
+  vi.mocked(core.isVaultOwner).mockReturnValue(true);
   vi.mocked(core.getVaultDetails).mockResolvedValue({
     name: "Vault",
     id: "!vault:localhost",
@@ -84,7 +84,7 @@ describe("MembersPanel access state", () => {
   it("does not refresh or clear an invite after ownership is revoked in flight", async () => {
     const share = deferred<{ vaultId: string; userId: string; role: "editor" }>();
     let role = "owner";
-    vi.mocked(core.getMyVaultRole).mockImplementation(() => role);
+    vi.mocked(core.isVaultOwner).mockImplementation(() => role === "owner");
     vi.mocked(core.listMembers).mockResolvedValue([]);
     vi.mocked(core.shareVault).mockReturnValue(share.promise);
     const user = userEvent.setup();
