@@ -2,6 +2,26 @@ import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import type { E2eUser } from "./testUsers";
 
+export interface ConsoleAudit {
+  assertClean: () => void;
+}
+
+/** Fail a test on every unexpected browser warning, error, or uncaught page error. */
+export function auditConsole(page: Page, allowed: RegExp[] = []): ConsoleAudit {
+  const unexpected: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() !== "warning" && message.type() !== "error") return;
+    const text = message.text();
+    if (!allowed.some((pattern) => pattern.test(text))) {
+      unexpected.push(`${message.type()}: ${text}`);
+    }
+  });
+  page.on("pageerror", (error) => unexpected.push(`pageerror: ${error.message}`));
+  return {
+    assertClean: () => expect(unexpected).toEqual([]),
+  };
+}
+
 /** Drives the real browser authorization-code + PKCE flow through the local
  * disposable MAS. Test credentials are entered only into MAS's page, never
  * into the Storage application. */
@@ -31,7 +51,7 @@ export async function loginViaUI(page: Page, user: E2eUser): Promise<void> {
 }
 
 export async function createVault(page: Page, name: string): Promise<string> {
-  await page.getByTestId("nav-folders").click();
+  await page.getByTestId("nav-vaults").click();
   await page.getByTestId("create-vault").click();
   const renameInput = page.getByTestId("rename-vault-input");
   await expect(renameInput).toBeVisible({ timeout: 20000 });
@@ -39,37 +59,35 @@ export async function createVault(page: Page, name: string): Promise<string> {
   await renameInput.press("Enter");
   const item = page.locator('[data-testid="vault-item"]', { hasText: name });
   await expect(item).toBeVisible({ timeout: 20000 });
-  const folderId = await item.getAttribute("data-folder-id");
-  if (!folderId) throw new Error(`vault item for "${name}" has no data-folder-id`);
-  return folderId;
+  const vaultId = await item.getAttribute("data-vault-id");
+  if (!vaultId) throw new Error(`vault item for "${name}" has no data-vault-id`);
+  return vaultId;
 }
 
 export async function openVaultByName(page: Page, name: string): Promise<void> {
-  await page.locator(".folder-list-btn", { hasText: name }).click();
-  await expect(page.getByTestId("folder-detail")).toBeVisible();
+  await page.locator(".vault-list-btn", { hasText: name }).click();
+  await expect(page.getByTestId("vault-detail")).toBeVisible();
 }
 
 /** userB's side: accept a pending invite for the shared vault. */
-export async function joinFolder(
+export async function joinVault(
   page: Page,
-  folderId: string,
-  folderName?: string,
+  vaultId: string,
+  vaultName?: string,
 ): Promise<void> {
-  await page.getByTestId("nav-folders").click();
-  const invite = page.locator('[data-testid="invite-item"]', {
-    has: page.locator(`[data-folder-id="${folderId}"]`),
-  });
+  await page.getByTestId("nav-vaults").click();
+  const invite = page.locator(`[data-testid="invite-item"][data-vault-id="${vaultId}"]`);
   if (await invite.isVisible({ timeout: 5000 }).catch(() => false)) {
     await invite.getByTestId("accept-invite").click();
-  } else if (folderName) {
-    const byName = page.locator('[data-testid="invite-item"]', { hasText: folderName });
+  } else if (vaultName) {
+    const byName = page.locator('[data-testid="invite-item"]', { hasText: vaultName });
     await expect(byName).toBeVisible({ timeout: 20000 });
     await byName.getByTestId("accept-invite").click();
   } else {
     await expect(invite).toBeVisible({ timeout: 20000 });
     await invite.getByTestId("accept-invite").click();
   }
-  await expect(page.locator(`[data-testid="vault-item"][data-folder-id="${folderId}"]`)).toBeVisible({
+  await expect(page.locator(`[data-testid="vault-item"][data-vault-id="${vaultId}"]`)).toBeVisible({
     timeout: 20000,
   });
 }
@@ -116,7 +134,6 @@ export async function downloadFileBytes(page: Page, name: string): Promise<Buffe
 }
 
 export async function confirmRecoveryKeySaved(page: Page): Promise<void> {
-  await page.getByTestId("copy-recovery-key").click();
   await page.getByTestId("confirm-saved-recovery-key").check();
   await page.getByTestId("recovery-setup-done").click();
   await expect(page.getByTestId("recovery-key-display")).not.toBeVisible({ timeout: 5000 });

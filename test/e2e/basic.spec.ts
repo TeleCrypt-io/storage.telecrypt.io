@@ -2,13 +2,13 @@ import { test, expect } from "@playwright/test";
 import { registerE2eUser } from "./testUsers";
 import { createVault, loginViaUI, openVaultByName, uploadFile, downloadFileBytes } from "./uiHelpers";
 
-test("login, create a folder, and it appears in the list", async ({ page }) => {
+test("login, create a vault, and it appears in the list", async ({ page }) => {
   const user = await registerE2eUser("e2e_basic");
   await loginViaUI(page, user);
 
   await createVault(page, "My Documents");
-  // createVault auto-opens the folder; confirm the file view mounted.
-  await expect(page.getByTestId("folder-detail")).toBeVisible();
+  // createVault auto-opens the vault; confirm the file view mounted.
+  await expect(page.getByTestId("vault-detail")).toBeVisible();
 });
 
 test("upload a file, it appears, download it, bytes match", async ({ page }) => {

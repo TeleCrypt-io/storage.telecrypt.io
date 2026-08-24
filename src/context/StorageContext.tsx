@@ -7,10 +7,32 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { TeleCryptIOStorage } from "../lib/core";
+import type { TeleCryptIOStorage } from "@telecrypt-io/storage";
 import { assertRuntimeOidcEndpoint, getRuntimeSettings, runtimeOidcIssuer } from "../lib/buildConfig";
-import { clearSession, loadSession, saveSession, type Session } from "../lib/session";
-import { prefetchCryptoWasm, watchWasmResourceProgress } from "../lib/wasmProgress";
+import {
+  clearPendingRevocation,
+  clearOidcTransientState,
+  clearSession,
+  loadPendingRevocations,
+  loadSession,
+  loadOidcLoginIntent,
+  savePendingRevocation,
+  saveSessionIfCurrent,
+  SESSION_CLEANUP_PENDING_ERROR,
+  SESSION_CLEANUP_PERSISTENCE_ERROR,
+  MAX_SESSION_IDENTITY_BYTES,
+  MAX_SESSION_TOKEN_BYTES,
+  SESSION_PERSISTENCE_ERROR,
+  type Session,
+} from "../lib/session";
+import { formatOperationError } from "../lib/formatOperationError";
+import {
+  classifyOidcCallback,
+  readOidcCallbackParams,
+  scrubOidcCallbackParams,
+} from "../lib/oidcCallback";
+import { revokeMatrixSession } from "../lib/revokeSession";
+import { withAccountSignal } from "../lib/accountOperation";
 
 export type ConnectionStatus = "signed-out" | "connecting" | "ready" | "error";
 
@@ -24,11 +46,30 @@ const UI_INIT_TIMEOUT_MS = 90_000;
 const UI_SYNC_TIMEOUT_MS = 45_000;
 /** Hard ceiling for the whole connect() call — never leave users on infinite Connecting. */
 const UI_CONNECT_TIMEOUT_MS = 120_000;
+/** One hard ceiling for discovery, authorization-code exchange, and callback validation. */
+const UI_OIDC_TIMEOUT_MS = 120_000;
+
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function isSafeToken(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    utf8ByteLength(value) <= MAX_SESSION_TOKEN_BYTES &&
+    ![...value].some(
+      (character) => /\s/u.test(character) || character.charCodeAt(0) < 0x20 || character.charCodeAt(0) === 0x7f,
+    )
+  );
+}
 
 interface StorageContextValue {
   status: ConnectionStatus;
   session: Session | null;
   storage: TeleCryptIOStorage | null;
+  /** Aborted immediately when this account/client is replaced or logged out. */
+  accountSignal: AbortSignal | null;
   error: string | null;
   /** Live status lines while connecting (empty when not connecting). */
   connectLog: ConnectLogEntry[];
@@ -36,18 +77,52 @@ interface StorageContextValue {
    * (navigates away). Sets `status`/`error` if discovery/DCR fail before
    * the redirect. */
   loginWithOidc: () => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  logoutPending: boolean;
 }
 
 const StorageContext = createContext<StorageContextValue | null>(null);
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
-    }),
-  ]);
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+  onExpire?: () => void,
+): { promise: Promise<T>; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel!: () => void;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => {
+      onExpire?.();
+      reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`));
+    }, ms);
+    cancel = () => {
+      if (timer === undefined) return;
+      clearTimeout(timer);
+      timer = undefined;
+      onExpire?.();
+      reject(new Error(`${label} cancelled`));
+    };
+  });
+  const timed = Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  });
+  return { promise: timed, cancel };
+}
+
+async function revokeOrRemember(
+  target: { homeserver: string; accessToken: string },
+  signal?: AbortSignal,
+): Promise<string | null> {
+  try {
+    await revokeMatrixSession(target, undefined, signal);
+    return clearPendingRevocation(target) ? null : SESSION_CLEANUP_PERSISTENCE_ERROR;
+  } catch {
+    return savePendingRevocation(target)
+      ? SESSION_CLEANUP_PENDING_ERROR
+      : SESSION_CLEANUP_PERSISTENCE_ERROR;
+  }
 }
 
 export function StorageProvider({ children }: { children: ReactNode }) {
@@ -56,11 +131,26 @@ export function StorageProvider({ children }: { children: ReactNode }) {
   const [storage, setStorage] = useState<TeleCryptIOStorage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connectLog, setConnectLog] = useState<ConnectLogEntry[]>([]);
+  const [logoutPending, setLogoutPending] = useState(false);
+  const [accountSignal, setAccountSignal] = useState<AbortSignal | null>(null);
   // Dedupes concurrent connect() calls for the same access token and guards
   // against building a second MatrixClient from a re-render racing auto-connect.
   const connectInflightRef = useRef<{ token: string; promise: Promise<void> } | null>(null);
   const connectGenRef = useRef(0);
   const connectStartedAtRef = useRef<number | null>(null);
+  const storageRef = useRef<TeleCryptIOStorage | null>(null);
+  const connectCleanupRef = useRef<(() => void) | null>(null);
+  const sessionRef = useRef<Session | null>(null);
+  const logoutInflightRef = useRef<{
+    generation: number;
+    accessToken: string;
+    controller: AbortController;
+    promise: Promise<void>;
+  } | null>(null);
+  const accountAbortRef = useRef<AbortController | null>(null);
+  const oidcAbortRef = useRef<AbortController | null>(null);
+  storageRef.current = storage;
+  sessionRef.current = session;
 
   const appendLog = useCallback((message: string) => {
     setConnectLog((prev) => [...prev, { at: Date.now(), message }]);
@@ -91,6 +181,18 @@ export function StorageProvider({ children }: { children: ReactNode }) {
       }
 
       const gen = ++connectGenRef.current;
+      connectCleanupRef.current?.();
+      connectCleanupRef.current = null;
+      const abortController = new AbortController();
+      let cancelTimeout: (() => void) | null = null;
+      const cleanup = () => {
+        abortController.abort();
+      };
+      const cancelOperation = () => {
+        cleanup();
+        cancelTimeout?.();
+      };
+      connectCleanupRef.current = cancelOperation;
 
       const run = (async () => {
         // Keep the latest persisted token set for this client. OAuth providers may rotate the
@@ -99,88 +201,162 @@ export function StorageProvider({ children }: { children: ReactNode }) {
         let currentSession = s;
         // Keep an existing log (e.g. an OIDC callback already
         // started connecting) instead of wiping it when connect() runs.
+        const log = (message: string) => {
+          if (gen === connectGenRef.current) appendLog(message);
+        };
+        const logDownload = (message: string) => {
+          if (gen === connectGenRef.current) appendOrReplaceDownloadLog(message);
+        };
+        let client: TeleCryptIOStorage | null = null;
         if (connectStartedAtRef.current == null) {
           beginConnecting(`Restoring session for ${s.userId}…`);
         } else {
-          appendLog(`Opening encrypted session for ${s.userId}…`);
+          log(`Opening encrypted session for ${s.userId}…`);
         }
         try {
-          const wasmWatchStop = watchWasmResourceProgress(appendOrReplaceDownloadLog);
-          void prefetchCryptoWasm(appendOrReplaceDownloadLog);
           const bootstrapOpts = {
             syncTimeoutMs: UI_SYNC_TIMEOUT_MS,
             initTimeoutMs: UI_INIT_TIMEOUT_MS,
+            signal: abortController.signal,
             onProgress: (message: string) => {
               if (gen !== connectGenRef.current) return;
               if (message.startsWith("Downloading encryption engine")) {
-                appendOrReplaceDownloadLog(message);
+                logDownload(message);
               } else {
-                appendLog(message);
+                log(message);
               }
             },
           };
-          let client!: TeleCryptIOStorage;
           try {
-            appendLog("Discovering authentication server…");
+            log("Discovering authentication server…");
             // Crypto and the Matrix SDK are intentionally fetched only when a
             // session is being opened, not on the public sign-in screen.
             const core = await import("../lib/core");
             const homeserver = getRuntimeSettings().homeserver;
-            const authMetadata = await core.discoverOidcIssuer(homeserver);
-            if (authMetadata.issuer !== runtimeOidcIssuer()) {
+            const authMetadata = await core.discoverOidcIssuer(homeserver, abortController.signal);
+            if (
+              typeof authMetadata.issuer !== "string" ||
+              utf8ByteLength(authMetadata.issuer) > MAX_SESSION_IDENTITY_BYTES ||
+              authMetadata.issuer !== runtimeOidcIssuer()
+            ) {
               throw new Error("Authentication issuer changed; log in again");
             }
-            const tokenEndpoint = assertRuntimeOidcEndpoint(
+            if (
+              typeof authMetadata.token_endpoint !== "string" ||
+              utf8ByteLength(authMetadata.token_endpoint) > MAX_SESSION_IDENTITY_BYTES
+            ) {
+              throw new Error("OIDC token endpoint is invalid or too large");
+            }
+            assertRuntimeOidcEndpoint(
               authMetadata.token_endpoint,
               "OIDC token endpoint",
             );
-            appendLog(`Auth issuer: ${authMetadata.issuer}`);
+            log(`Auth issuer: ${authMetadata.issuer}`);
             const tokenRefreshFunction = core.buildTokenRefreshFunction(
-              tokenEndpoint,
+              authMetadata,
               s.oidcClientId,
               async (tokens) => {
-                currentSession = {
+                const accessTokenIsSafe = isSafeToken(tokens.accessToken);
+                const refreshTokenIsSafe =
+                  tokens.refreshToken === undefined || isSafeToken(tokens.refreshToken);
+                if (!accessTokenIsSafe || !refreshTokenIsSafe) {
+                  if (accessTokenIsSafe) {
+                    const cleanupError = await revokeOrRemember(
+                      { homeserver, accessToken: tokens.accessToken },
+                      abortController.signal,
+                    );
+                    if (cleanupError) throw new Error(cleanupError);
+                  }
+                  throw new Error("OIDC token response is invalid or too large");
+                }
+                if (gen !== connectGenRef.current) {
+                  const cleanupError = await revokeOrRemember(
+                    { homeserver, accessToken: tokens.accessToken },
+                    abortController.signal,
+                  );
+                  throw new Error(cleanupError ?? "Session is no longer active");
+                }
+                const previousSession = currentSession;
+                const nextSession = {
                   ...currentSession,
                   accessToken: tokens.accessToken,
                   refreshToken: tokens.refreshToken ?? currentSession.refreshToken,
                 };
-                saveSession(currentSession);
-                if (gen === connectGenRef.current) setSession(currentSession);
+                if (!saveSessionIfCurrent(nextSession, previousSession)) {
+                  const cleanupError = await revokeOrRemember(
+                    { homeserver, accessToken: tokens.accessToken },
+                    abortController.signal,
+                  );
+                  throw new Error(cleanupError ?? "Session is no longer active");
+                }
+                currentSession = nextSession;
+                if (gen === connectGenRef.current) {
+                  sessionRef.current = currentSession;
+                  setSession(currentSession);
+                }
               },
+              s.deviceId,
             );
-            appendLog("Building encrypted client (OIDC session)…");
+            const guardedTokenRefreshFunction = async (
+              refreshToken: string,
+              refreshSignal?: AbortSignal,
+            ) => {
+              if (
+                !isSafeToken(refreshToken)
+              ) {
+                throw new Error("OIDC refresh token is invalid or too large");
+              }
+              if (gen !== connectGenRef.current) throw new Error("Session is no longer active");
+              return tokenRefreshFunction(refreshToken, refreshSignal ?? abortController.signal);
+            };
+            log("Building encrypted client (OIDC session)…");
             client = await core.TeleCryptIOStorage.createFromOidc({
               baseUrl: homeserver,
               userId: s.userId,
               accessToken: s.accessToken,
               deviceId: s.deviceId,
               refreshToken: s.refreshToken,
-              tokenRefreshFunction,
+              tokenRefreshFunction: guardedTokenRefreshFunction,
               ...bootstrapOpts,
             });
           } finally {
-            wasmWatchStop();
+            cleanup();
+            if (connectCleanupRef.current === cancelOperation) connectCleanupRef.current = null;
           }
+          if (!client) throw new Error("Encrypted client was not created");
           if (gen !== connectGenRef.current) {
             client.getClient().stopClient();
             return;
           }
-          appendLog("Connected.");
+          log("Connected.");
+          accountAbortRef.current?.abort();
+          const accountAbortController = new AbortController();
+          accountAbortRef.current = accountAbortController;
+          setAccountSignal(accountAbortController.signal);
           setStorage(client);
+          sessionRef.current = currentSession;
           setSession(currentSession);
           setStatus("ready");
         } catch (err) {
+          client?.getClient().stopClient();
           if (gen !== connectGenRef.current) return;
-          const msg = (err as Error).message;
+          const msg = formatOperationError(err);
           appendLog(`Failed: ${msg}`);
           setError(msg);
           setStatus("error");
         }
       })();
 
-      const timed = withTimeout(run, UI_CONNECT_TIMEOUT_MS, "Connection").catch((err) => {
+      const timedControl = withTimeout(run, UI_CONNECT_TIMEOUT_MS, "Connection");
+      cancelTimeout = timedControl.cancel;
+      const timed = timedControl.promise.catch((err) => {
         if (gen !== connectGenRef.current) return;
-        const msg = (err as Error).message;
+        // Invalidate this generation and abort the SDK bootstrap signal.
+        connectGenRef.current += 1;
+        cancelOperation();
+        if (connectCleanupRef.current === cancelOperation) connectCleanupRef.current = null;
+        connectStartedAtRef.current = null;
+        const msg = formatOperationError(err);
         appendLog(`Failed: ${msg}`);
         setError(msg);
         setStatus("error");
@@ -198,65 +374,267 @@ export function StorageProvider({ children }: { children: ReactNode }) {
     [appendLog, appendOrReplaceDownloadLog, beginConnecting],
   );
 
-  useEffect(() => {
-    const callbackParams = new URLSearchParams(window.location.search);
-    if (callbackParams.has("code") && callbackParams.has("state")) {
-      beginConnecting("Completing sign-in…");
-      void import("../lib/oidcAuth")
-        .then(({ completeOidcLoginFromCallback }) => completeOidcLoginFromCallback())
-        .then((s) => {
-          appendLog(`Signed in as ${s.userId}`);
-          saveSession(s);
-          return connect(s);
-        })
-        .catch((err) => {
-          const msg = (err as Error).message;
-          appendLog(`Failed: ${msg}`);
-          setError(msg);
-          setStatus("error");
-        });
-      // Intentionally run once on mount only; loginWithOidc() drives
-      // subsequent connections explicitly.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      return;
-    }
-    const existing = loadSession();
-    if (existing) {
-      void connect(existing);
-    }
-    // Intentionally run once on mount only; loginWithOidc() drives
-    // subsequent connections explicitly.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const loginWithOidc = useCallback(
-    async () => {
-      beginConnecting("Redirecting to sign-in…");
-      try {
-        const { beginOidcLogin } = await import("../lib/oidcAuth");
-        await beginOidcLogin(); // navigates away on success
-      } catch (err) {
-        const msg = (err as Error).message;
-        appendLog(`Failed: ${msg}`);
-        setError(msg);
-        setStatus("error");
-      }
-    },
-    [appendLog, beginConnecting],
-  );
-
-  const logout = useCallback(() => {
+  const invalidateActiveConnection = useCallback(() => {
     connectGenRef.current += 1;
-    storage?.getClient().stopClient();
-    clearSession();
+    connectCleanupRef.current?.();
+    connectCleanupRef.current = null;
+    const currentStorage = storageRef.current;
+    storageRef.current = null;
+    currentStorage?.getClient().stopClient();
     connectInflightRef.current = null;
     connectStartedAtRef.current = null;
+    accountAbortRef.current?.abort();
+    accountAbortRef.current = null;
+    setAccountSignal(null);
+    oidcAbortRef.current?.abort();
+    oidcAbortRef.current = null;
+    logoutInflightRef.current?.controller.abort();
+    logoutInflightRef.current = null;
+    sessionRef.current = null;
     setStorage(null);
     setSession(null);
     setConnectLog([]);
-    setStatus("signed-out");
+  }, []);
+
+  const resetConnection = useCallback((clearPersistedSession: boolean) => {
+    invalidateActiveConnection();
+    const persistedSessionCleared = !clearPersistedSession || clearSession();
+    setStatus(persistedSessionCleared ? "signed-out" : "error");
+    setError(persistedSessionCleared ? null : formatOperationError(new Error(SESSION_PERSISTENCE_ERROR)));
+  }, [invalidateActiveConnection]);
+
+  useEffect(() => {
+    return () => {
+      connectGenRef.current += 1;
+      connectCleanupRef.current?.();
+      connectCleanupRef.current = null;
+      const currentStorage = storageRef.current;
+      storageRef.current = null;
+      currentStorage?.getClient().stopClient();
+      accountAbortRef.current?.abort();
+      accountAbortRef.current = null;
+      oidcAbortRef.current?.abort();
+      oidcAbortRef.current = null;
+      connectInflightRef.current = null;
+      sessionRef.current = null;
+      logoutInflightRef.current?.controller.abort();
+      logoutInflightRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const restoreExistingSession = () => {
+      let pendingCleanup: number;
+      try {
+        pendingCleanup = loadPendingRevocations().length;
+      } catch {
+        setError(formatOperationError(new Error(SESSION_CLEANUP_PERSISTENCE_ERROR)));
+        setStatus("error");
+        return;
+      }
+      if (pendingCleanup !== 0) {
+        setError(formatOperationError(new Error(SESSION_CLEANUP_PENDING_ERROR)));
+        setStatus("error");
+        return;
+      }
+      const existing = loadSession();
+      if (existing) {
+        if (storageRef.current && sessionRef.current) setStatus("ready");
+        else void connect(existing);
+      } else {
+        setStatus("signed-out");
+      }
+    };
+    const callbackKind = classifyOidcCallback(window.location);
+    if (callbackKind === "malformed") {
+      scrubOidcCallbackParams(window.location);
+      // A malformed/spurious callback must not clear a live session, but it must
+      // not leave an old one-time PKCE transaction available for replay either.
+      const cleared = clearOidcTransientState();
+      if (!cleared) {
+        setError(formatOperationError(new Error(SESSION_PERSISTENCE_ERROR)));
+        setStatus("error");
+      } else restoreExistingSession();
+      return;
+    }
+    if (callbackKind === "success" || callbackKind === "error") {
+      const callbackParams = readOidcCallbackParams(window.location);
+      const callbackState = callbackParams.get("state");
+      const callbackIntent = loadOidcLoginIntent();
+      if (!callbackIntent || !callbackState || callbackState !== callbackIntent.state) {
+        scrubOidcCallbackParams(window.location);
+        const cleared = clearOidcTransientState();
+        if (!cleared) {
+          setError(formatOperationError(new Error(SESSION_PERSISTENCE_ERROR)));
+          setStatus("error");
+          return;
+        }
+        restoreExistingSession();
+        return;
+      }
+      invalidateActiveConnection();
+      const callbackGeneration = connectGenRef.current;
+      const callbackAbortController = new AbortController();
+      oidcAbortRef.current = callbackAbortController;
+      beginConnecting("Completing sign-in…");
+      void import("../lib/oidcAuth")
+        .then(({ completeOidcLoginFromCallback }) =>
+          withTimeout(
+            withAccountSignal(callbackAbortController.signal, () =>
+              completeOidcLoginFromCallback(callbackAbortController.signal),
+            ),
+            UI_OIDC_TIMEOUT_MS,
+            "Sign-in callback",
+            () => callbackAbortController.abort(),
+          ).promise,
+        )
+        .then(async (s) => {
+          if (callbackGeneration !== connectGenRef.current) {
+            await revokeOrRemember(s, callbackAbortController.signal);
+            return;
+          }
+          appendLog(`Signed in as ${s.userId}`);
+          let saved = false;
+          try {
+            saved = saveSessionIfCurrent(s, null);
+          } catch {
+            saved = false;
+          }
+          if (!saved) {
+            const cleanupError =
+              (await revokeOrRemember(s, callbackAbortController.signal)) ?? SESSION_PERSISTENCE_ERROR;
+            if (callbackGeneration !== connectGenRef.current) return;
+            resetConnection(false);
+            setError(
+              formatOperationError(new Error(cleanupError)),
+            );
+            setStatus("error");
+            return;
+          }
+          return connect(s);
+        })
+        .catch((err) => {
+          if (callbackGeneration !== connectGenRef.current) return;
+          const msg = formatOperationError(err);
+          appendLog(`Failed: ${msg}`);
+          setError(msg);
+          setStatus("error");
+        })
+        .finally(() => {
+          if (oidcAbortRef.current === callbackAbortController) oidcAbortRef.current = null;
+        });
+      // Intentionally run once on mount only; loginWithOidc() drives
+      // subsequent connections explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+      return;
+    }
+    restoreExistingSession();
+    // Intentionally run once on mount only; loginWithOidc() drives
+    // subsequent connections explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beginConnecting, connect, invalidateActiveConnection]);
+
+  const loginWithOidc = useCallback(
+    async () => {
+      invalidateActiveConnection();
+      setLogoutPending(false);
+      beginConnecting("Redirecting to sign-in…");
+      const loginAbortController = new AbortController();
+      oidcAbortRef.current = loginAbortController;
+      try {
+        const begin = import("../lib/oidcAuth");
+        await withTimeout(
+          withAccountSignal(loginAbortController.signal, async () =>
+            (await begin).beginOidcLogin(loginAbortController.signal),
+          ),
+          UI_OIDC_TIMEOUT_MS,
+          "OIDC sign-in",
+          () => loginAbortController.abort(),
+        ).promise; // navigates away on success
+      } catch (err) {
+        const msg = formatOperationError(err);
+        appendLog(`Failed: ${msg}`);
+        // The client was stopped before cleanup began. Keep the persisted session or pending
+        // revocation record for the next retry, but never present a possibly revoked client as
+        // live after a replacement-login failure.
+        resetConnection(false);
+        setError(msg);
+        setStatus("error");
+      } finally {
+        if (oidcAbortRef.current === loginAbortController) oidcAbortRef.current = null;
+      }
+    },
+    [appendLog, beginConnecting, invalidateActiveConnection, resetConnection],
+  );
+
+  const logout = useCallback(async () => {
+    const inflight = logoutInflightRef.current;
+    if (inflight && inflight.generation === connectGenRef.current) {
+      return inflight.promise;
+    }
+    const target = sessionRef.current;
+    if (!target) {
+      resetConnection(true);
+      return;
+    }
+
+    invalidateActiveConnection();
+    const generation = connectGenRef.current;
+    const logoutController = new AbortController();
+    setLogoutPending(true);
     setError(null);
-  }, [storage]);
+    const operation = (async () => {
+      let current = target;
+      try {
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          await revokeMatrixSession(current, undefined, logoutController.signal);
+          // A new login or connection may have started while the network request was in flight.
+          // Never inspect or revoke that newer session as if it were a rotated token from logout.
+          if (generation !== connectGenRef.current) return;
+          const latest = loadSession();
+          if (
+            !latest ||
+            (latest.accessToken === current.accessToken && latest.refreshToken === current.refreshToken)
+          ) {
+            if (!clearPendingRevocation(current)) {
+              throw new Error(SESSION_CLEANUP_PERSISTENCE_ERROR);
+            }
+            resetConnection(true);
+            setLogoutPending(false);
+            return;
+          }
+          if (!clearPendingRevocation(current)) {
+            throw new Error(SESSION_CLEANUP_PERSISTENCE_ERROR);
+          }
+          current = latest;
+        }
+        if (!savePendingRevocation(current)) throw new Error(SESSION_CLEANUP_PERSISTENCE_ERROR);
+        throw new Error(SESSION_CLEANUP_PENDING_ERROR);
+      } catch (err) {
+        const recorded = savePendingRevocation(current);
+        if (generation === connectGenRef.current) {
+          resetConnection(false);
+          setError(formatOperationError(recorded ? err : new Error(SESSION_CLEANUP_PERSISTENCE_ERROR)));
+          setStatus("error");
+          setLogoutPending(false);
+        }
+        return;
+      } finally {
+        if (generation === connectGenRef.current) setLogoutPending(false);
+      }
+    })();
+    logoutInflightRef.current = {
+      generation,
+      accessToken: target.accessToken,
+      controller: logoutController,
+      promise: operation,
+    };
+    try {
+      await operation;
+    } finally {
+      if (logoutInflightRef.current?.promise === operation) logoutInflightRef.current = null;
+    }
+  }, [invalidateActiveConnection, resetConnection]);
 
   return (
     <StorageContext.Provider
@@ -264,10 +642,12 @@ export function StorageProvider({ children }: { children: ReactNode }) {
         status,
         session,
         storage,
+        accountSignal,
         error,
         connectLog,
         loginWithOidc,
         logout,
+        logoutPending,
       }}
     >
       {children}

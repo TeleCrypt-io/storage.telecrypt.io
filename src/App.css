@@ -144,7 +144,7 @@
   min-height: 0;
 }
 
-.folder-sidebar {
+.vault-sidebar {
   width: var(--sidebar-width);
   flex-shrink: 0;
   padding: 16px;
@@ -169,7 +169,7 @@
   margin-bottom: 12px;
 }
 
-.sidebar-new-folder {
+.sidebar-new-vault {
   width: 100%;
   margin-bottom: 12px;
 }
@@ -220,25 +220,6 @@
 
 .sidebar-rename {
   width: 100%;
-}
-
-.recovery-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  margin-bottom: 12px;
-  background: color-mix(in srgb, #d9822b 10%, var(--surface));
-  border: 1px solid color-mix(in srgb, #d9822b 40%, var(--border));
-  border-radius: var(--radius);
-  font-size: 0.9em;
-}
-
-.topbar nav button.needs-attention {
-  color: #b45309;
-  font-weight: 600;
-  border-color: color-mix(in srgb, #d9822b 50%, var(--border));
 }
 
 .upload-hint {
@@ -323,19 +304,19 @@
   background: var(--bg);
 }
 
-.folder-list {
+.vault-list {
   list-style: none;
   padding: 0;
   margin: 0;
 }
 
-.folder-list li {
+.vault-list li {
   display: flex;
   flex-direction: column;
   margin-bottom: 2px;
 }
 
-.folder-list-btn {
+.vault-list-btn {
   display: block;
   width: 100%;
   padding: 8px 10px;
@@ -346,11 +327,11 @@
   color: var(--text);
 }
 
-.folder-list-btn:hover {
+.vault-list-btn:hover {
   background: var(--hover);
 }
 
-.folder-list-btn.active {
+.vault-list-btn.active {
   background: var(--active);
   font-weight: 500;
 }
@@ -361,7 +342,7 @@
   padding: 0 10px 6px;
 }
 
-.folder-main {
+.vault-main {
   flex: 1;
   min-width: 0;
   padding: 16px 20px;
@@ -376,7 +357,7 @@
   min-height: 200px;
 }
 
-.folder-contents {
+.vault-contents {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -388,7 +369,7 @@
   transition: border-color 0.15s;
 }
 
-.folder-contents.drag-over {
+.vault-contents.drag-over {
   border-color: var(--border-strong);
   background: color-mix(in srgb, var(--hover) 50%, var(--surface));
 }
@@ -415,20 +396,6 @@
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-}
-
-.inline-form {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.subfolder-form input {
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  min-width: 140px;
 }
 
 .file-table-wrap {
@@ -463,7 +430,7 @@
   white-space: nowrap;
 }
 
-.folder-nav-row {
+.vault-nav-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -506,10 +473,6 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85rem;
   resize: vertical;
-}
-
-.recovery-key-actions {
-  margin: 8px 0;
 }
 
 .recovery-confirm-label {
@@ -671,7 +634,7 @@
     flex-direction: column;
   }
 
-  .folder-sidebar,
+  .vault-sidebar,
   .right-panel,
   .members-panel {
     width: 100%;
@@ -680,7 +643,7 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .folder-main {
+  .vault-main {
     width: 100%;
     box-sizing: border-box;
   }
@@ -717,14 +680,14 @@
     white-space: nowrap;
   }
 
-  .folder-sidebar,
-  .folder-main,
+  .vault-sidebar,
+  .vault-main,
   .right-panel,
   .members-panel {
     padding: 14px;
   }
 
-  .folder-contents {
+  .vault-contents {
     padding: 14px;
   }
 

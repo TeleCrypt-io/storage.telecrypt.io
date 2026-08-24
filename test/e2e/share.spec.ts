@@ -1,15 +1,17 @@
 import { test, expect } from "@playwright/test";
 import { registerE2eUser } from "./testUsers";
 import {
+  auditConsole,
+  confirmRecoveryKeySaved,
   createVault,
   downloadFileBytes,
-  joinFolder,
+  joinVault,
   loginViaUI,
   openVaultByName,
   uploadFile,
 } from "./uiHelpers";
 
-// The core product flow: userA creates a folder and shares it with userB as
+// The core product flow: userA creates a vault and shares it with userB as
 // editor (two independent browser contexts — two real, separate crypto
 // devices); userB uploads a file; userA sees and downloads userB's file,
 // with bytes identical to what userB uploaded. No mocks — real Synapse,
@@ -22,11 +24,22 @@ test("multi-participant share: userA and userB exchange a file", async ({ browse
   const contextB = await browser.newContext();
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
+  const consoleA = auditConsole(pageA);
+  const consoleB = auditConsole(pageB);
 
   try {
     await loginViaUI(pageA, userA);
-    const folderId = await createVault(pageA, "Team Folder");
-    await openVaultByName(pageA, "Team Folder");
+    // Sharing a vault may attempt to send historical room keys. Establish the
+    // account's cross-signing/backup trust state first; an unverified-device
+    // warning here would mean the share did not meet that security contract.
+    await pageA.getByTestId("nav-recovery").click();
+    await pageA.getByTestId("setup-recovery").click();
+    await expect(pageA.getByTestId("recovery-key-value")).toBeVisible({ timeout: 20000 });
+    await confirmRecoveryKeySaved(pageA);
+    await expect(pageA.getByTestId("recovery-active")).toBeVisible({ timeout: 20000 });
+    await pageA.getByTestId("nav-vaults").click();
+    const vaultId = await createVault(pageA, "Team Vault");
+    await openVaultByName(pageA, "Team Vault");
 
     await pageA.getByTestId("share-user-id").fill(userB.userId);
     await pageA.getByTestId("share-role").selectOption("editor");
@@ -36,10 +49,10 @@ test("multi-participant share: userA and userB exchange a file", async ({ browse
     ).toBeVisible({ timeout: 20000 });
 
     // userB: log in (separate context = separate device/crypto store), join
-    // the folder by the ID userA's session exposed in the DOM, and upload.
+    // the vault by the ID userA's session exposed in the DOM, and upload.
     await loginViaUI(pageB, userB);
-    await joinFolder(pageB, folderId, "Team Folder");
-    await openVaultByName(pageB, "Team Folder");
+    await joinVault(pageB, vaultId, "Team Vault");
+    await openVaultByName(pageB, "Team Vault");
 
     const bobBytes = Buffer.from("hello from userB's editor upload\n".repeat(20));
     await uploadFile(pageB, "from-b.txt", "text/plain", bobBytes);
@@ -50,6 +63,8 @@ test("multi-participant share: userA and userB exchange a file", async ({ browse
     ).toBeVisible({ timeout: 20000 });
     const downloadedByA = await downloadFileBytes(pageA, "from-b.txt");
     expect(downloadedByA.equals(bobBytes)).toBe(true);
+    consoleA.assertClean();
+    consoleB.assertClean();
   } finally {
     await contextA.close();
     await contextB.close();

@@ -1,0 +1,134 @@
+import { readFileSync } from "node:fs";
+
+// Offline behavioral checks for the Pages Release state machine.  The fixtures
+// below cover the remote outcomes that must be distinguished before mutation.
+const workflow = readFileSync(".github/workflows/release-ui.yml", "utf8");
+const verify = readFileSync(".github/workflows/verify.yml", "utf8");
+const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+if (readFileSync(".node-version", "utf8").trim() !== "22.23.2" || packageJson.packageManager !== "npm@10.9.8" || packageJson.engines?.node !== ">=22.23.2") throw new Error("Node/npm toolchain policy is not encoded exactly");
+
+function job(name) {
+  const match = workflow.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|(?![\\s\\S]))`, "m"));
+  if (!match) throw new Error(`missing workflow job: ${name}`);
+  return match[1];
+}
+
+function step(jobText, name) {
+  const marker = `      - name: ${name}\n`;
+  const start = jobText.indexOf(marker);
+  if (start < 0) throw new Error(`missing step: ${name}`);
+  const shell = jobText.indexOf("        run: |\n", start);
+  if (shell < 0) throw new Error(`step has no shell: ${name}`);
+  const bodyStart = shell + "        run: |\n".length;
+  const end = jobText.indexOf("\n      - ", bodyStart);
+  return jobText.slice(bodyStart, end < 0 ? jobText.length : end);
+}
+
+function exactPublished(tag) {
+  return {
+    id: 42,
+    tag_name: tag,
+    name: tag,
+    body: `Release ${tag}`,
+    target_commitish: "a".repeat(40),
+    created_at: "2026-08-24T00:00:00Z",
+    published_at: "2026-08-24T00:00:01Z",
+    draft: false,
+    prerelease: false,
+    immutable: true,
+    assets: [{ id: 43, name: `storage-web-${tag.slice("storage-web-v".length)}.pages.zip`, state: "uploaded", size: 10, digest: `sha256:${"a".repeat(64) }` }],
+  };
+}
+
+function publicationAction(probe, attempt, tag = "storage-web-v1.2.3") {
+  if (probe === null) return "create-draft";
+  if (probe.transport === "timeout" || probe.transport === "error") throw new Error("transport failure");
+  if (probe.tag_name !== tag || probe.name !== tag || probe.body !== `Release ${tag}` || probe.target_commitish !== "a".repeat(40) || probe.prerelease !== false) throw new Error("identity conflict");
+  if (probe.draft === true) {
+    if (probe.created_at !== "2026-08-24T00:00:00Z" || probe.published_at !== null) throw new Error("draft timestamp conflict");
+    if (probe.immutable !== undefined && probe.immutable !== false) throw new Error("draft immutable");
+    if (!Number.isSafeInteger(probe.id) || probe.id <= 0 || !Array.isArray(probe.assets) || probe.assets.length > 64 || probe.assets.some((asset) => !Number.isSafeInteger(asset?.id) || asset.id <= 0)) throw new Error("draft identity or asset bounds conflict");
+    return "reuse-draft";
+  }
+  if (probe.draft === false) {
+    if (attempt <= 1 || probe.immutable !== true || probe.created_at !== "2026-08-24T00:00:00Z" || probe.published_at !== "2026-08-24T00:00:01Z" || probe.assets?.length !== 1) throw new Error("published conflict");
+    return "reuse-published";
+  }
+  throw new Error("unknown state");
+}
+
+function finalPublishRecheck(probe, tag = "storage-web-v1.2.3") {
+  if (publicationAction(probe, 1, tag) !== "reuse-draft") throw new Error("final state is not a draft");
+  const expectedName = `storage-web-${tag.slice("storage-web-v".length)}.pages.zip`;
+  if (probe.id !== 42 || probe.assets.length !== 1 || probe.assets[0]?.id !== 43 || probe.assets[0]?.name !== expectedName || probe.assets[0]?.state !== "uploaded" || probe.assets[0]?.size !== 10 || probe.assets[0]?.digest !== `sha256:${"a".repeat(64)}`) throw new Error("final draft asset changed");
+}
+
+const tag = "storage-web-v1.2.3";
+if (publicationAction(null, 1, tag) !== "create-draft") throw new Error("404 did not create a draft");
+if (publicationAction({ id: 42, tag_name: tag, name: tag, body: `Release ${tag}`, target_commitish: "a".repeat(40), created_at: "2026-08-24T00:00:00Z", published_at: null, draft: true, prerelease: false, assets: [] }, 1, tag) !== "reuse-draft") throw new Error("draft was not reusable");
+if (publicationAction(exactPublished(tag), 2, tag) !== "reuse-published") throw new Error("exact rerun was not reusable");
+const exactDraft = { id: 42, tag_name: tag, name: tag, body: `Release ${tag}`, target_commitish: "a".repeat(40), created_at: "2026-08-24T00:00:00Z", published_at: null, draft: true, prerelease: false, immutable: false, assets: [{ id: 43, name: "storage-web-1.2.3.pages.zip", state: "uploaded", size: 10, digest: `sha256:${"a".repeat(64)}` }] };
+finalPublishRecheck(exactDraft, tag);
+for (const mutation of ["id", "tag_name", "name", "body", "target_commitish", "draft", "prerelease", "immutable", "created_at", "published_at", "asset_state", "asset_size", "assets", "asset_id", "duplicate_name", "duplicate_id"]) {
+  const mutated = { ...exactDraft };
+  if (mutation === "assets") mutated.assets = [{ ...exactDraft.assets[0], digest: `sha256:${"b".repeat(64)}` }];
+  else if (mutation === "asset_id") mutated.assets = [{ ...exactDraft.assets[0], id: 44 }];
+  else if (mutation === "duplicate_name") mutated.assets = [exactDraft.assets[0], { ...exactDraft.assets[0], id: 44 }];
+  else if (mutation === "duplicate_id") mutated.assets = [exactDraft.assets[0], { ...exactDraft.assets[0], name: "other.pages.zip" }];
+  else if (mutation === "asset_state") mutated.assets = [{ ...exactDraft.assets[0], state: "pending" }];
+  else if (mutation === "asset_size") mutated.assets = [{ ...exactDraft.assets[0], size: 11 }];
+  else if (mutation === "id") mutated.id = 43;
+  else if (mutation === "immutable") mutated.immutable = true;
+  else if (mutation === "created_at") mutated.created_at = "not-a-timestamp";
+  else if (mutation === "published_at") mutated.published_at = "2026-08-24T00:00:01Z";
+  else mutated[mutation] = mutation === "draft" ? false : mutation === "prerelease" ? true : "changed";
+  try {
+    finalPublishRecheck(mutated, tag);
+  } catch {
+    continue;
+  }
+  throw new Error(`final draft recheck accepted a ${mutation} mutation`);
+}
+for (const invalid of [{ transport: "timeout" }, { transport: "error" }, { ...exactPublished(tag), immutable: false }, { ...exactPublished(tag), assets: [] }, { id: 0, tag_name: tag, name: tag, body: `Release ${tag}`, target_commitish: "a".repeat(40), created_at: "2026-08-24T00:00:00Z", published_at: null, draft: true, prerelease: false, assets: [] }, { id: 42, tag_name: tag, name: tag, body: `Release ${tag}`, target_commitish: "a".repeat(40), created_at: "2026-08-24T00:00:00Z", published_at: null, draft: true, prerelease: false, assets: [{ id: 0 }] }]) {
+  try {
+    publicationAction(invalid, 2, tag);
+  } catch {
+    continue;
+  }
+  throw new Error("invalid Release state was accepted");
+}
+
+const release = job("release");
+const deploy = job("deploy");
+const build = job("build");
+const releaseShell = step(release, "Create or reuse the exact draft Release");
+const packageShell = step(build, "Package the deterministic Pages artifact");
+const deployVerifyShell = step(deploy, "Download and verify the immutable Release artifact");
+  for (const fragment of [
+  "refs/tags/$RELEASE_TAG:refs/remotes/origin/release-tag", "refs/heads/main:refs/remotes/origin/main",
+  "git cat-file -t refs/remotes/origin/release-tag", "git merge-base --is-ancestor",
+  "https://github.com/${GITHUB_REPOSITORY}.git", "--no-includes", "--name-only", "protocol.file.allow=never",
+  "protocol.ext.allow=never", "protocol.ssh.allow=never", "credential.helper=", "core.askPass=/bin/false",
+  "http.proxy=", "https.proxy=", "scripts/bounded-command.py", "--include", "status_line", "--method POST",
+  "--field draft=true", "target_commitish=$RELEASE_SHA", "--method DELETE", "--input \"$archive\"", "Accept: application/octet-stream",
+  "cmp -s \"$archive\"", "--method PATCH", "--field draft=false", "GITHUB_RUN_ATTEMPT",
+]) if (!releaseShell.includes(fragment)) throw new Error(`release state machine is missing ${fragment}`);
+for (const fragment of ["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_PARAMETERS", "GH_HOST: github.com", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]) {
+  if (!workflow.includes(fragment)) throw new Error(`transport hardening is missing ${fragment}`);
+}
+if (releaseShell.indexOf("--method POST") > releaseShell.indexOf("--method DELETE") || releaseShell.indexOf("--method DELETE") > releaseShell.indexOf("--input \"$archive\"") || releaseShell.indexOf("--input \"$archive\"") > releaseShell.indexOf("--method PATCH")) throw new Error("draft lifecycle operations are out of order");
+if (workflow.includes("gh release create") || workflow.includes("release create") || workflow.includes("--draft") || workflow.includes("releases?per_page=")) throw new Error("one-shot or broad Release recovery remains");
+if (!releaseShell.includes("(.assets|length) <= 64") || !releaseShell.includes("created_at") || !releaseShell.includes("published_at")) throw new Error("draft cardinality/timestamp bounds are missing");
+if (!workflow.includes("concurrency:\n  group: pages-storage-web-")) throw new Error("Pages concurrency is missing");
+if (!release.includes("needs: build") && !workflow.includes("release:\n    needs: build")) throw new Error("Release does not depend on the tested build");
+if (!workflow.includes("needs: [build, release]")) throw new Error("Pages deployment is not downstream of publication");
+if (deploy.indexOf("actions/upload-pages-artifact@v5.0.0") < 0 || deploy.indexOf("actions/deploy-pages@v5.0.0") < 0) throw new Error("Pages ordering is not explicit");
+if (workflow.indexOf("actions/upload-pages-artifact@v5.0.0") > workflow.indexOf("actions/deploy-pages@v5.0.0")) throw new Error("Pages deployment precedes artifact upload");
+for (const fragment of ["validate-pages-archive.py", "pages_digest", "pages_size"]) if (!workflow.includes(fragment)) throw new Error(`Pages artifact contract is missing ${fragment}`);
+for (const line of workflow.split("\n").filter((line) => line.includes("gh api"))) if (!line.includes("--hostname github.com")) throw new Error(`GitHub API is not pinned: ${line}`);
+if (!packageShell.includes("bounded_package") || !packageShell.includes("package-pages.sh") || !packageShell.includes("validate-pages-archive.py")) throw new Error("Pages packaging commands are not bounded");
+if (!deployVerifyShell.includes("bounded_local") || !deployVerifyShell.includes("unzip -q") || !deployVerifyShell.includes("validate-pages-archive.py")) throw new Error("Pages artifact extraction commands are not bounded");
+if (!verify.includes("npm run verify:archive") || !verify.includes("npm run verify:package")) throw new Error("verification contract is incomplete");
+if (!releaseShell.includes("revalidate_draft_for_publish")) throw new Error("the draft is not re-fetched immediately before publication");
+if (!releaseShell.includes('verify_source\n              revalidate_draft_for_publish "$probe" "$release_id"\n              bounded_gh "$RUNNER_TEMP/published.json"')) throw new Error("publication does not perform the final source and Release recheck immediately before PATCH");
+console.log("storage Release behavioral invariants passed");

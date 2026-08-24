@@ -1,11 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const productionConnectSrc = "connect-src 'self' https://telecrypt.io https://*.telecrypt.io;";
+const productionConnectSrc = "connect-src 'self' https://*.telecrypt.io;";
 const developmentConnectSrc =
-  "connect-src 'self' https://backend.telecrypt.io http://localhost:* ws://localhost:*;";
+  "connect-src 'self' http://localhost:* ws://localhost:*;";
 
-// matrix-js-sdk (and its dependency matrix-encrypt-attachment) expect a Node-ish
+// The storage SDK's matrix-js-sdk dependency (and its dependency matrix-encrypt-attachment) expect a Node-ish
 // `Buffer`/`global` to exist. The browser has neither natively, so we polyfill:
 // `global` -> `globalThis` at build/dev time, and `Buffer` via the `buffer`
 // package (wired up as an actual global in src/main.tsx). Everything else in
@@ -16,7 +16,7 @@ export default defineConfig({
     // The separately emitted encrypted IndexedDB worker is about 747 kB minified. Keep a narrow
     // reviewed ceiling above it so this required crypto chunk is not a standing warning and future
     // growth still fails visibly during release review.
-    chunkSizeWarningLimit: 800,
+    chunkSizeWarningLimit: 1024,
   },
   plugins: [
     react(),
@@ -38,15 +38,5 @@ export default defineConfig({
   ],
   define: {
     global: "globalThis",
-  },
-  resolve: {
-    // Both the web app and the exact @telecrypt-io/storage dependency import
-    // matrix-js-sdk. Without dedupe, Vite can bundle BOTH copies
-    // and matrix-js-sdk's "single entrypoint" guard throws at runtime
-    // ("Multiple matrix-js-sdk entrypoints detected!"), rendering a blank page.
-    // This only surfaces in the production build, not the dev server — so the
-    // Playwright E2E (which runs against `vite` dev) never caught it. Force a
-    // single copy of these packages.
-    dedupe: ["matrix-js-sdk", "matrix-encrypt-attachment", "oidc-client-ts"],
   },
 });

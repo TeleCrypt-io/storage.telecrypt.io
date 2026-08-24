@@ -41,12 +41,18 @@ test("create subfolder, upload inside, rename and delete subfolder", async ({ pa
   });
 
   await page.locator('[data-testid="subfolder-item"]', { hasText: "Child" }).locator(".row-name-btn").click();
-  await expect(page.getByLabel("Folder path").getByTestId("breadcrumb-item").last()).toHaveText("Child");
+  await expect(page.getByLabel("Vault path").getByTestId("breadcrumb-item").last()).toHaveText("Child");
+  await expect(page.getByTestId("vault-detail")).toHaveAttribute("data-folder-id", /.+/);
+  await expect(page.getByTestId("vault-detail")).not.toHaveAttribute("data-vault-id");
+  await expect(page.getByTestId("members-panel")).not.toBeVisible();
 
   const bytes = Buffer.from("inside subfolder");
   await uploadFile(page, "inside.txt", "text/plain", bytes);
 
   await page.locator('[data-testid="breadcrumb-item"]', { hasText: "Parent" }).click();
+  await expect(page.getByTestId("vault-detail")).toHaveAttribute("data-vault-id", /.+/);
+  await expect(page.getByTestId("vault-detail")).not.toHaveAttribute("data-folder-id");
+  await expect(page.getByTestId("members-panel")).toBeVisible();
   const subRow = page.locator('[data-testid="subfolder-item"]', { hasText: "Child" });
   await subRow.getByTestId("rename-subfolder").click();
   await page.getByTestId("rename-input").fill("Renamed");

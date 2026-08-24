@@ -17,7 +17,7 @@ test("create vault with rename and navigate up to vault list", async ({ page }) 
   await expect(page.locator('[data-testid="vault-item"]', { hasText: "Project Alpha" })).toBeVisible({
     timeout: 20000,
   });
-  await expect(page.getByTestId("folder-detail")).toBeVisible();
+  await expect(page.getByTestId("vault-detail")).toBeVisible();
 
   await page.getByTestId("nav-up").click();
   await expect(page.getByTestId("select-vault-prompt")).toBeVisible();
@@ -42,8 +42,8 @@ test("rename and delete a vault from the sidebar", async ({ page }) => {
   await expect(page.getByTestId("select-vault-prompt")).toBeVisible({ timeout: 20_000 });
 });
 
-test("new folder button creates untitled subfolder with inline rename", async ({ page }) => {
-  const user = await registerE2eUser("e2e_new_folder");
+test("vault view creates an untitled subfolder with inline rename", async ({ page }) => {
+  const user = await registerE2eUser("e2e_new_subfolder");
   await loginViaUI(page, user);
   await createVault(page, "Workspace");
   await openVaultByName(page, "Workspace");
@@ -73,6 +73,7 @@ test("upload folder with nested tree", async ({ page }) => {
 
   try {
     await page.getByTestId("folder-input").setInputFiles(rootDir);
+    await expect(page.getByTestId("upload-folder-button")).toBeEnabled({ timeout: 20000 });
 
     await page.locator('[data-testid="subfolder-item"]', { hasText: "root" }).locator(".row-name-btn").click();
     await expect(page.locator('[data-testid="file-item"]', { hasText: "a.txt" })).toBeVisible({

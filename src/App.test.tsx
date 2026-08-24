@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 import * as core from "./lib/core";
@@ -7,18 +7,21 @@ import * as oidcAuth from "./lib/oidcAuth";
 import { formatElapsed } from "./lib/formatElapsed";
 import { formatOperationError } from "./lib/formatOperationError";
 import { runtimeOidcIssuer, getRuntimeSettings } from "./lib/buildConfig";
+import * as revocation from "./lib/revokeSession";
+import * as session from "./lib/session";
 
 vi.mock("./lib/core", async () => {
   const actual = await vi.importActual<typeof import("./lib/core")>("./lib/core");
   return {
     ...actual,
     TeleCryptIOStorage: { create: vi.fn(), createFromOidc: vi.fn() },
+    buildTokenRefreshFunction: vi.fn(actual.buildTokenRefreshFunction),
     discoverOidcIssuer: vi.fn(),
-    listFolders: vi.fn(),
+    listVaults: vi.fn(),
     listPendingInvites: vi.fn(),
-    getMyFolderRole: vi.fn(),
-    createFolder: vi.fn(),
-    joinFolder: vi.fn(),
+    getMyVaultRole: vi.fn(),
+    createVault: vi.fn(),
+    joinVault: vi.fn(),
     declineInvite: vi.fn(),
     listFiles: vi.fn(),
     listSubfolders: vi.fn(),
@@ -26,22 +29,27 @@ vi.mock("./lib/core", async () => {
     uploadFile: vi.fn(),
     downloadFile: vi.fn(),
     renameFile: vi.fn(),
+    renameVault: vi.fn(),
     renameFolder: vi.fn(),
     deleteFile: vi.fn(),
+    deleteVault: vi.fn(),
     deleteFolder: vi.fn(),
-    shareFolder: vi.fn(),
-    unshareFolder: vi.fn(),
+    shareVault: vi.fn(),
+    unshareVault: vi.fn(),
     listMembers: vi.fn(),
     getFileDetails: vi.fn(),
+    getVaultDetails: vi.fn(),
     getFolderDetails: vi.fn(),
-    setupRecovery: vi.fn(),
-    restoreRecovery: vi.fn(),
   };
 });
 
 vi.mock("./lib/oidcAuth", () => ({
   beginOidcLogin: vi.fn(),
   completeOidcLoginFromCallback: vi.fn(),
+}));
+
+vi.mock("./lib/revokeSession", () => ({
+  revokeMatrixSession: vi.fn(),
 }));
 
 const SESSION = {
@@ -53,29 +61,59 @@ const SESSION = {
   oidcClientId: "client-123",
 };
 
-function fakeStorage() {
+function abortOptions() {
+  return expect.objectContaining({ signal: expect.anything() });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function fakeStorage(recoverySetup = false) {
+  const stopClient = vi.fn();
+  const crypto = {
+    getKeyBackupInfo: vi.fn().mockResolvedValue(recoverySetup ? {} : null),
+    getSecretStorageStatus: vi.fn().mockResolvedValue({
+      defaultKeyId: recoverySetup ? "key" : null,
+      ready: recoverySetup,
+    }),
+  };
   return {
-    getClient: () => ({ stopClient: vi.fn() }),
+    stopClient,
+    getClient: () => ({
+      stopClient,
+      getCrypto: () => crypto,
+      getAccountDataFromServer: vi.fn().mockResolvedValue(recoverySetup ? {} : null),
+    }),
     keys: {
-      isRecoverySetup: vi.fn().mockResolvedValue(false),
+      isRecoverySetup: vi.fn().mockResolvedValue(recoverySetup),
       setupRecovery: vi.fn(),
       restoreFromRecoveryKey: vi.fn(),
     },
   };
 }
 
-async function loginAndReachVaults(initialVaults: Array<{ id: string; name: string }> = []) {
-  const storage = fakeStorage();
+async function loginAndReachVaults(
+  initialVaults: Array<{ id: string; name: string }> = [],
+  recoverySetup = false,
+) {
+  const storage = fakeStorage(recoverySetup);
   vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
     issuer: runtimeOidcIssuer(),
     token_endpoint: `${getRuntimeSettings().homeserver}/auth/token`,
   } as never);
   vi.mocked(core.TeleCryptIOStorage.createFromOidc).mockResolvedValue(storage as never);
-  vi.mocked(core.listFolders).mockResolvedValue(initialVaults);
-  localStorage.setItem("telecrypt-io-ui:session", JSON.stringify(SESSION));
+  vi.mocked(core.listVaults).mockResolvedValue(initialVaults);
+  sessionStorage.setItem("telecrypt-io-ui:session", JSON.stringify(SESSION));
 
   const user = userEvent.setup();
-  render(<App />);
+  const view = render(<App />);
 
   await waitFor(() => expect(screen.getByTestId("current-user")).toHaveTextContent(SESSION.userId));
   if (initialVaults.length === 0) {
@@ -83,7 +121,7 @@ async function loginAndReachVaults(initialVaults: Array<{ id: string; name: stri
   } else {
     await screen.findByText(initialVaults[0].name);
   }
-  return { storage, user };
+  return { storage, user, view };
 }
 
 async function openVault(
@@ -97,23 +135,32 @@ async function openVault(
   vi.mocked(core.listFiles).mockImplementation(async () => opts?.files ?? []);
   vi.mocked(core.listSubfolders).mockImplementation(async () => opts?.subfolders ?? []);
   vi.mocked(core.listMembers).mockImplementation(async () => opts?.members ?? []);
-  vi.mocked(core.getFolderDetails).mockResolvedValue({
+  vi.mocked(core.getVaultDetails).mockResolvedValue({
     name,
-    id: "!f:localhost",
+    id: "!vault:localhost",
     createdAt: null,
     memberCount: opts?.members?.length ?? 1,
   });
-  const { user } = await loginAndReachVaults([{ id: "!f:localhost", name }]);
+  const { user } = await loginAndReachVaults([{ id: "!vault:localhost", name }]);
   await user.click(screen.getByRole("button", { name }));
-  await screen.findByTestId("folder-detail");
+  await screen.findByTestId("vault-detail");
   return user;
 }
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   vi.clearAllMocks();
-  vi.mocked(core.getMyFolderRole).mockReturnValue("owner");
+  vi.mocked(core.getMyVaultRole).mockReturnValue("owner");
   vi.mocked(core.listPendingInvites).mockResolvedValue([]);
+  vi.mocked(core.getFileDetails).mockResolvedValue({
+    name: "file.txt",
+    mimetype: "text/plain",
+    size: 5,
+    createdAt: null,
+    updatedAt: null,
+  });
+  vi.mocked(revocation.revokeMatrixSession).mockResolvedValue(undefined);
 });
 
 describe("formatElapsed", () => {
@@ -142,8 +189,41 @@ describe("formatOperationError", () => {
     );
   });
 
-  it("passes through other errors unchanged", () => {
-    expect(formatOperationError(new Error("network down"))).toBe("network down");
+  it("does not expose upstream error text or identifiers", () => {
+    expect(formatOperationError(new Error("HTTP 500 for !secret-room:localhost"))).toBe(
+      "The operation could not be completed. Please try again.",
+    );
+    expect(formatOperationError(new Error("OIDC token exchange failed: provider body contains a token"))).toBe(
+      "The operation could not be completed. Please try again.",
+    );
+  });
+
+  it("uses stable messages for persistence and retry failures", () => {
+    expect(formatOperationError(new Error("Session persistence failed"))).toBe(
+      "Sign-in could not be completed securely. Try again.",
+    );
+    expect(formatOperationError(new Error("Session cleanup is pending"))).toBe(
+      "Previous sign-in cleanup is pending. Try again.",
+    );
+    expect(formatOperationError(new Error("Session cleanup could not be persisted"))).toBe(
+      "Sign-in cleanup could not be saved. Try again.",
+    );
+    expect(formatOperationError(new Error("Browser persistent storage is unavailable"))).toBe(
+      "Sign-in could not be completed securely. Try again.",
+    );
+  });
+
+  it("maps current SDK error codes without relying on message capitalization", () => {
+    expect(
+      formatOperationError(Object.assign(new Error("file exceeds the 128 MiB limit"), { code: "FILE_TOO_LARGE" })),
+    ).toBe("File exceeds the 128 MiB limit.");
+    expect(
+      formatOperationError(
+        Object.assign(new Error("recovery restore failed; verify the Recovery Key and account"), {
+          code: "RECOVERY_RESTORE_FAILED",
+        }),
+      ),
+    ).toBe("The recovery key was rejected.");
   });
 });
 
@@ -155,11 +235,17 @@ describe("login", () => {
     expect(screen.queryByTestId("password")).not.toBeInTheDocument();
     expect(screen.queryByTestId("submit")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("oidc-login"));
-    expect(oidcAuth.beginOidcLogin).toHaveBeenCalledWith();
+    expect(oidcAuth.beginOidcLogin).toHaveBeenCalledWith(expect.anything());
   });
 
   it("restores only an OIDC session and opens the vault list", async () => {
     await loginAndReachVaults();
+    expect(core.buildTokenRefreshFunction).toHaveBeenCalledWith(
+      expect.anything(),
+      SESSION.oidcClientId,
+      expect.any(Function),
+      SESSION.deviceId,
+    );
     expect(core.TeleCryptIOStorage.createFromOidc).toHaveBeenCalledWith(
       expect.objectContaining({
         baseUrl: SESSION.homeserver,
@@ -172,29 +258,42 @@ describe("login", () => {
   });
 
   it("discards an incomplete OIDC session", () => {
-    localStorage.setItem(
+    sessionStorage.setItem(
       "telecrypt-io-ui:session",
       JSON.stringify({ ...SESSION, refreshToken: undefined }),
     );
     render(<App />);
     expect(screen.getByTestId("oidc-login")).toBeInTheDocument();
     expect(core.TeleCryptIOStorage.create).not.toHaveBeenCalled();
-    expect(localStorage.getItem("telecrypt-io-ui:session")).toBeNull();
+    expect(sessionStorage.getItem("telecrypt-io-ui:session")).toBeNull();
+  });
+
+  it("discards a saved session without a device identity before building a refresh adapter", () => {
+    const incomplete = { ...SESSION } as Record<string, unknown>;
+    delete incomplete.deviceId;
+    sessionStorage.setItem("telecrypt-io-ui:session", JSON.stringify(incomplete));
+
+    render(<App />);
+
+    expect(screen.getByTestId("oidc-login")).toBeInTheDocument();
+    expect(core.buildTokenRefreshFunction).not.toHaveBeenCalled();
+    expect(core.TeleCryptIOStorage.createFromOidc).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("telecrypt-io-ui:session")).toBeNull();
   });
 
   it("discards a saved session for a different runtime homeserver", () => {
-    localStorage.setItem(
+    sessionStorage.setItem(
       "telecrypt-io-ui:session",
       JSON.stringify({ ...SESSION, homeserver: "https://unexpected.example.test" }),
     );
     render(<App />);
     expect(screen.getByTestId("oidc-login")).toBeInTheDocument();
     expect(core.TeleCryptIOStorage.createFromOidc).not.toHaveBeenCalled();
-    expect(localStorage.getItem("telecrypt-io-ui:session")).toBeNull();
+    expect(sessionStorage.getItem("telecrypt-io-ui:session")).toBeNull();
   });
 
   it("refuses to send a refresh token to a changed OIDC issuer", async () => {
-    localStorage.setItem("telecrypt-io-ui:session", JSON.stringify(SESSION));
+    sessionStorage.setItem("telecrypt-io-ui:session", JSON.stringify(SESSION));
     vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
       issuer: "https://unexpected.example.test/",
       token_endpoint: "https://unexpected.example.test/token",
@@ -218,12 +317,16 @@ describe("login", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ access_token: "access-rotated", refresh_token: "refresh-rotated" }),
+          JSON.stringify({
+            token_type: "Bearer",
+            access_token: "access-rotated",
+            refresh_token: "refresh-rotated",
+          }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ access_token: "access-later" }), {
+        new Response(JSON.stringify({ token_type: "Bearer", access_token: "access-later" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -232,7 +335,7 @@ describe("login", () => {
     const first = await refresh!(SESSION.refreshToken);
     await refresh!(first.refreshToken!);
 
-    expect(JSON.parse(localStorage.getItem("telecrypt-io-ui:session")!)).toEqual(
+    expect(JSON.parse(sessionStorage.getItem("telecrypt-io-ui:session")!)).toEqual(
       expect.objectContaining({
         accessToken: "access-later",
         refreshToken: "refresh-rotated",
@@ -240,51 +343,216 @@ describe("login", () => {
     );
     fetchMock.mockRestore();
   });
+
+  it("rejects an oversized refresh token before making a token request", async () => {
+    await loginAndReachVaults();
+    const createOptions = vi.mocked(core.TeleCryptIOStorage.createFromOidc).mock.calls[0][0];
+    const refresh = createOptions.tokenRefreshFunction;
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(refresh!("x".repeat(8193))).rejects.toThrow("OIDC refresh token is invalid or too large");
+    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockRestore();
+  });
+
+  it("rejects a token refresh that completes after logout without restoring the session", async () => {
+    const { storage, user } = await loginAndReachVaults();
+    const createOptions = vi.mocked(core.TeleCryptIOStorage.createFromOidc).mock.calls[0][0];
+    const refresh = createOptions.tokenRefreshFunction;
+    expect(refresh).toBeDefined();
+
+    await user.click(screen.getByTestId("logout"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        token_type: "Bearer",
+        access_token: "stale-access",
+        refresh_token: "stale-refresh",
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(refresh!(SESSION.refreshToken)).rejects.toThrow("Session is no longer active");
+    expect(sessionStorage.getItem("telecrypt-io-ui:session")).toBeNull();
+    expect(storage.stopClient).toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("stops the client and locks the persisted session when remote logout cannot be confirmed", async () => {
+    const { storage, user } = await loginAndReachVaults();
+    vi.mocked(revocation.revokeMatrixSession).mockRejectedValueOnce(
+      new Error("Session revocation failed"),
+    );
+
+    await user.click(screen.getByTestId("logout"));
+
+    expect(screen.queryByTestId("current-user")).not.toBeInTheDocument();
+    expect(screen.getByTestId("auth-error")).toHaveTextContent("Sign-out could not be confirmed. Try again.");
+    expect(screen.getByTestId("auth-error")).not.toHaveTextContent("token-body-secret");
+    expect(sessionStorage.getItem("telecrypt-io-ui:session")).not.toBeNull();
+    expect(storage.stopClient).toHaveBeenCalled();
+  });
+
+  it("revokes a callback token when tab session persistence fails", async () => {
+    window.history.replaceState({}, "", "/?code=one&state=two");
+    sessionStorage.setItem(
+      session.OIDC_LOGIN_INTENT_STORAGE_KEY,
+      JSON.stringify({ state: "two", createdAt: Date.now() }),
+    );
+    vi.mocked(oidcAuth.completeOidcLoginFromCallback).mockResolvedValue(SESSION);
+    const saveSpy = vi.spyOn(session, "saveSessionIfCurrent").mockReturnValue(false);
+
+    render(<App />);
+
+    await waitFor(() =>
+      expect(revocation.revokeMatrixSession).toHaveBeenCalledWith(
+        expect.objectContaining({ homeserver: SESSION.homeserver, accessToken: SESSION.accessToken }),
+      ),
+    );
+    expect(await screen.findByTestId("auth-error")).toHaveTextContent(
+      "Sign-in could not be completed securely. Try again.",
+    );
+    expect(screen.getByTestId("oidc-login")).toBeInTheDocument();
+    saveSpy.mockRestore();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("does not disrupt a saved session for a spurious callback without login intent", async () => {
+    window.history.replaceState({}, "", "/?code=spurious&state=unknown");
+    const { storage } = await loginAndReachVaults();
+
+    expect(screen.getByTestId("current-user")).toHaveTextContent(SESSION.userId);
+    expect(storage.stopClient).not.toHaveBeenCalled();
+    expect(oidcAuth.completeOidcLoginFromCallback).not.toHaveBeenCalled();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("stops a client that finishes after the connection timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = fakeStorage();
+      const bootstrap = deferred<unknown>();
+      vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
+        issuer: runtimeOidcIssuer(),
+        token_endpoint: `${getRuntimeSettings().homeserver}/auth/token`,
+      } as never);
+      vi.mocked(core.TeleCryptIOStorage.createFromOidc).mockReturnValue(bootstrap.promise as never);
+      sessionStorage.setItem("telecrypt-io-ui:session", JSON.stringify(SESSION));
+      render(<App />);
+
+      for (let i = 0; i < 8 && !vi.mocked(core.TeleCryptIOStorage.createFromOidc).mock.calls.length; i++) {
+        await act(async () => {
+          await Promise.resolve();
+        });
+      }
+      expect(core.TeleCryptIOStorage.createFromOidc).toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(120_000);
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId("auth-error")).toHaveTextContent("Connection timed out");
+      expect(vi.getTimerCount()).toBe(0);
+
+      bootstrap.resolve(storage);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(storage.stopClient).toHaveBeenCalled();
+      expect(screen.queryByTestId("current-user")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the client when the storage provider unmounts", async () => {
+    const { storage, view } = await loginAndReachVaults();
+    view.unmount();
+    expect(storage.stopClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops a client that finishes after the storage provider unmounts", async () => {
+    const storage = fakeStorage();
+    const bootstrap = deferred<unknown>();
+    vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
+      issuer: runtimeOidcIssuer(),
+      token_endpoint: `${getRuntimeSettings().homeserver}/auth/token`,
+    } as never);
+    vi.mocked(core.TeleCryptIOStorage.createFromOidc).mockReturnValue(bootstrap.promise as never);
+    sessionStorage.setItem("telecrypt-io-ui:session", JSON.stringify(SESSION));
+    const view = render(<App />);
+
+    for (let i = 0; i < 8 && !vi.mocked(core.TeleCryptIOStorage.createFromOidc).mock.calls.length; i++) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+    expect(core.TeleCryptIOStorage.createFromOidc).toHaveBeenCalled();
+
+    view.unmount();
+    bootstrap.resolve(storage);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(storage.stopClient).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("vaults", () => {
-  it("creates a vault via core.createFolder with untitled name and inline rename", async () => {
+  it("creates a vault via core.createVault with untitled name and inline rename", async () => {
     await loginAndReachVaults();
     vi.mocked(core.listFiles).mockResolvedValue([]);
     vi.mocked(core.listSubfolders).mockResolvedValue([]);
     vi.mocked(core.listMembers).mockResolvedValue([]);
-    vi.mocked(core.getFolderDetails).mockResolvedValue({
+    vi.mocked(core.getVaultDetails).mockResolvedValue({
       name: "Untitled vault",
       id: "!new:localhost",
       createdAt: null,
       memberCount: 1,
     });
-    vi.mocked(core.createFolder).mockResolvedValue({ id: "!new:localhost", name: "Untitled vault" });
-    vi.mocked(core.renameFolder).mockResolvedValue({ id: "!new:localhost", name: "Docs" });
-    vi.mocked(core.listFolders).mockResolvedValue([{ id: "!new:localhost", name: "Docs" }]);
+    vi.mocked(core.createVault).mockResolvedValue({ id: "!new:localhost", name: "Untitled vault" });
+    vi.mocked(core.renameVault).mockResolvedValue({ id: "!new:localhost", name: "Docs" });
+    vi.mocked(core.listVaults).mockResolvedValue([{ id: "!new:localhost", name: "Docs" }]);
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("create-vault"));
 
-    expect(core.createFolder).toHaveBeenCalledWith(expect.anything(), "Untitled vault");
+    expect(core.createVault).toHaveBeenCalledWith(
+      expect.anything(),
+      "Untitled vault",
+      abortOptions(),
+    );
 
     const renameInput = await screen.findByTestId("rename-vault-input");
     fireEvent.change(renameInput, { target: { value: "Docs" } });
     fireEvent.keyDown(renameInput, { key: "Enter" });
     await waitFor(() =>
-      expect(core.renameFolder).toHaveBeenCalledWith(expect.anything(), "!new:localhost", "Docs"),
+      expect(core.renameVault).toHaveBeenCalledWith(
+        expect.anything(),
+        "!new:localhost",
+        "Docs",
+        abortOptions(),
+      ),
     );
-    expect(await screen.findByTestId("folder-detail")).toHaveAttribute("data-folder-id", "!new:localhost");
+    expect(await screen.findByTestId("vault-detail")).toHaveAttribute("data-vault-id", "!new:localhost");
   });
 
   it("lists and selects a vault", async () => {
     vi.mocked(core.listFiles).mockResolvedValue([{ id: "$file1", name: "report.pdf" }]);
-    await loginAndReachVaults([{ id: "!f:localhost", name: "Docs" }]);
+    await loginAndReachVaults([{ id: "!vault:localhost", name: "Docs" }]);
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Docs" }));
 
-    expect(core.listFiles).toHaveBeenCalledWith(expect.anything(), "!f:localhost");
+    expect(core.listFiles).toHaveBeenCalledWith(expect.anything(), "!vault:localhost", abortOptions());
     expect(await screen.findByText("report.pdf")).toBeInTheDocument();
   });
 
   it("hides destructive vault controls from non-owners", async () => {
-    vi.mocked(core.getMyFolderRole).mockReturnValue("viewer");
+    vi.mocked(core.getMyVaultRole).mockReturnValue("viewer");
     await loginAndReachVaults([{ id: "!shared:localhost", name: "Shared" }]);
 
     const item = screen.getByTestId("vault-item");
@@ -292,8 +560,41 @@ describe("vaults", () => {
     expect(item).not.toContainElement(screen.queryByTestId("delete-vault"));
   });
 
-  it("accepts a pending invite via core.joinFolder", async () => {
-    vi.mocked(core.listFolders).mockResolvedValue([]);
+  it("hides access mutations from non-owners", async () => {
+    vi.mocked(core.getMyVaultRole).mockReturnValue("viewer");
+    await openVault("Shared", {
+      members: [{ userId: "@bob:localhost", role: "viewer", membership: "join" }],
+    });
+
+    await waitFor(() => expect(screen.getByTestId("member-item")).toBeInTheDocument());
+    expect(screen.getByTestId("members-readonly")).toHaveTextContent(
+      "Only vault owners can manage access.",
+    );
+    expect(screen.queryByTestId("share-submit")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("unshare-member")).not.toBeInTheDocument();
+  });
+
+  it("rechecks ownership before an already-rendered access mutation", async () => {
+    let role = "owner";
+    vi.mocked(core.getMyVaultRole).mockImplementation(() => role);
+    const user = await openVault("Shared", {
+      members: [{ userId: "@bob:localhost", role: "viewer", membership: "join" }],
+    });
+    await waitFor(() => expect(screen.getByTestId("member-item")).toBeInTheDocument());
+
+    await user.type(screen.getByTestId("share-user-id"), "@carol:localhost");
+    const shareSubmit = screen.getByTestId("share-submit");
+    const unshareMember = screen.getByTestId("unshare-member");
+    role = "viewer";
+    await user.click(shareSubmit);
+    await user.click(unshareMember);
+
+    expect(core.shareVault).not.toHaveBeenCalled();
+    expect(core.unshareVault).not.toHaveBeenCalled();
+  });
+
+  it("accepts a pending invite via core.joinVault", async () => {
+    vi.mocked(core.listVaults).mockResolvedValue([]);
     vi.mocked(core.listPendingInvites).mockResolvedValue([
       { id: "!shared:localhost", name: "Shared" },
     ]);
@@ -303,12 +604,16 @@ describe("vaults", () => {
     await user.click(screen.getByTestId("accept-invite"));
 
     await waitFor(() =>
-      expect(core.joinFolder).toHaveBeenCalledWith(expect.anything(), "!shared:localhost"),
+      expect(core.joinVault).toHaveBeenCalledWith(
+        expect.anything(),
+        "!shared:localhost",
+        abortOptions(),
+      ),
     );
   });
 
   it("declines a pending invite via core.declineInvite", async () => {
-    vi.mocked(core.listFolders).mockResolvedValue([]);
+    vi.mocked(core.listVaults).mockResolvedValue([]);
     vi.mocked(core.listPendingInvites).mockResolvedValue([
       { id: "!shared:localhost", name: "Shared" },
     ]);
@@ -318,7 +623,11 @@ describe("vaults", () => {
     await user.click(screen.getByTestId("decline-invite"));
 
     await waitFor(() =>
-      expect(core.declineInvite).toHaveBeenCalledWith(expect.anything(), "!shared:localhost"),
+      expect(core.declineInvite).toHaveBeenCalledWith(
+        expect.anything(),
+        "!shared:localhost",
+        abortOptions(),
+      ),
     );
   });
 
@@ -327,22 +636,60 @@ describe("vaults", () => {
     await user.click(screen.getByTestId("nav-up"));
     expect(await screen.findByTestId("select-vault-prompt")).toBeInTheDocument();
   });
+
+  it("keeps a later vault selected when an earlier vault deletion finishes", async () => {
+    const deletion = deferred<{ id: string; deleted: boolean }>();
+    vi.mocked(core.listFiles).mockResolvedValue([]);
+    vi.mocked(core.listSubfolders).mockResolvedValue([]);
+    vi.mocked(core.listMembers).mockResolvedValue([]);
+    vi.mocked(core.listVaults).mockResolvedValue([
+      { id: "!a:localhost", name: "A" },
+      { id: "!b:localhost", name: "B" },
+    ]);
+    vi.mocked(core.deleteVault).mockReturnValue(deletion.promise);
+
+    const { user } = await loginAndReachVaults([
+      { id: "!a:localhost", name: "A" },
+      { id: "!b:localhost", name: "B" },
+    ]);
+    await user.click(screen.getByRole("button", { name: "A" }));
+    vi.stubGlobal("confirm", () => true);
+    await user.click(screen.getAllByTestId("delete-vault")[0]);
+    await user.click(screen.getByRole("button", { name: "B" }));
+    expect(await screen.findByTestId("vault-detail")).toHaveAttribute("data-vault-id", "!b:localhost");
+
+    deletion.resolve({ id: "!a:localhost", deleted: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("vault-detail")).toHaveAttribute("data-vault-id", "!b:localhost"),
+    );
+    vi.unstubAllGlobals();
+  });
 });
 
-describe("folder contents", () => {
+describe("vault contents", () => {
   it("creates a subfolder via button + inline rename", async () => {
     const user = await openVault();
     vi.mocked(core.createSubfolder).mockResolvedValue({ id: "!sub:localhost", name: "Untitled folder" });
     vi.mocked(core.listSubfolders).mockResolvedValue([{ id: "!sub:localhost", name: "Child" }]);
 
     await user.click(screen.getByTestId("create-subfolder"));
-    expect(core.createSubfolder).toHaveBeenCalledWith(expect.anything(), "!f:localhost", "Untitled folder");
+    expect(core.createSubfolder).toHaveBeenCalledWith(
+      expect.anything(),
+      "!vault:localhost",
+      "Untitled folder",
+      abortOptions(),
+    );
 
     const renameInput = await screen.findByTestId("rename-input");
     fireEvent.change(renameInput, { target: { value: "Child" } });
     fireEvent.keyDown(renameInput, { key: "Enter" });
     await waitFor(() =>
-      expect(core.renameFolder).toHaveBeenCalledWith(expect.anything(), "!sub:localhost", "Child"),
+      expect(core.renameFolder).toHaveBeenCalledWith(
+        expect.anything(),
+        "!sub:localhost",
+        "Child",
+        abortOptions(),
+      ),
     );
   });
 
@@ -358,13 +705,66 @@ describe("folder contents", () => {
     await waitFor(() =>
       expect(core.uploadFile).toHaveBeenCalledWith(
         expect.anything(),
-        "!f:localhost",
+        "!vault:localhost",
         "hello.txt",
         expect.any(Uint8Array),
         "text/plain",
+        abortOptions(),
       ),
     );
     expect(await screen.findByText("hello.txt")).toBeInTheDocument();
+  });
+
+  it("clears root contents while a nested folder is still loading", async () => {
+    const childFiles = deferred<Array<{ id: string; name: string }>>();
+    const childDetails = deferred<{
+      name: string;
+      id: string;
+      createdAt: string | null;
+      memberCount: number | null;
+    }>();
+    const user = await openVault("Docs", {
+      files: [{ id: "$root", name: "root.txt" }],
+      subfolders: [{ id: "!sub:localhost", name: "Child" }],
+    });
+    await screen.findByText("root.txt");
+    await waitFor(() =>
+      expect(screen.getByTestId("details-panel").querySelector(".details-list dd")).toHaveTextContent(
+        "Docs",
+      ),
+    );
+
+    vi.mocked(core.listFiles).mockImplementation(async (_, id) =>
+      id === "!sub:localhost" ? childFiles.promise : [{ id: "$root", name: "root.txt" }],
+    );
+    vi.mocked(core.listSubfolders).mockImplementation(async (_, id) =>
+      id === "!sub:localhost" ? [] : [{ id: "!sub:localhost", name: "Child" }],
+    );
+    vi.mocked(core.getFolderDetails).mockReturnValue(childDetails.promise);
+
+    await user.click(screen.getByTestId("subfolder-item").querySelector(".row-name-btn")!);
+    expect(screen.queryByText("root.txt")).not.toBeInTheDocument();
+    expect(screen.getByTestId("vault-detail")).toHaveAttribute("data-folder-id", "!sub:localhost");
+    expect(screen.getByTestId("details-panel").querySelector(".details-list dd")).toBeNull();
+
+    childFiles.resolve([]);
+    childDetails.resolve({
+      name: "Child",
+      id: "!sub:localhost",
+      createdAt: null,
+      memberCount: 1,
+    });
+    expect(await screen.findByTestId("no-files")).toBeInTheDocument();
+    expect(screen.getByTestId("vault-detail")).toHaveAttribute("data-folder-id", "!sub:localhost");
+    expect(screen.getByTestId("vault-detail")).not.toHaveAttribute("data-vault-id");
+    expect(screen.queryByTestId("members-panel")).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByTestId("breadcrumb-item")[0]);
+    await waitFor(() =>
+      expect(screen.getByTestId("vault-detail")).toHaveAttribute("data-vault-id", "!vault:localhost"),
+    );
+    expect(screen.getByTestId("vault-detail")).not.toHaveAttribute("data-folder-id");
+    expect(screen.getByTestId("members-panel")).toBeInTheDocument();
   });
 
   it("shows mapped error when upload fails with 413", async () => {
@@ -374,7 +774,7 @@ describe("folder contents", () => {
     const file = new File(["x"], "big.bin", { type: "application/octet-stream" });
     await user.upload(screen.getByTestId("file-input"), file);
 
-    expect(await screen.findByTestId("folder-detail-error")).toHaveTextContent(
+    expect(await screen.findByTestId("vault-detail-error")).toHaveTextContent(
       "Server refused to create file",
     );
   });
@@ -391,7 +791,12 @@ describe("folder contents", () => {
     await user.click(screen.getByTestId("download-file"));
 
     await waitFor(() =>
-      expect(core.downloadFile).toHaveBeenCalledWith(expect.anything(), "!f:localhost", "$f1"),
+      expect(core.downloadFile).toHaveBeenCalledWith(
+        expect.anything(),
+        "!vault:localhost",
+        "$f1",
+        abortOptions(),
+      ),
     );
   });
 
@@ -404,14 +809,25 @@ describe("folder contents", () => {
     fireEvent.change(input, { target: { value: "new.txt" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
-      expect(core.renameFile).toHaveBeenCalledWith(expect.anything(), "!f:localhost", "$f1", "new.txt"),
+      expect(core.renameFile).toHaveBeenCalledWith(
+        expect.anything(),
+        "!vault:localhost",
+        "$f1",
+        "new.txt",
+        abortOptions(),
+      ),
     );
 
     vi.stubGlobal("confirm", () => true);
     vi.mocked(core.listFiles).mockResolvedValue([]);
     await user.click(screen.getByTestId("delete-file"));
     await waitFor(() =>
-      expect(core.deleteFile).toHaveBeenCalledWith(expect.anything(), "!f:localhost", "$f1"),
+      expect(core.deleteFile).toHaveBeenCalledWith(
+        expect.anything(),
+        "!vault:localhost",
+        "$f1",
+        abortOptions(),
+      ),
     );
     vi.unstubAllGlobals();
   });
@@ -425,13 +841,22 @@ describe("folder contents", () => {
     fireEvent.change(input, { target: { value: "Renamed" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
-      expect(core.renameFolder).toHaveBeenCalledWith(expect.anything(), "!sub:localhost", "Renamed"),
+      expect(core.renameFolder).toHaveBeenCalledWith(
+        expect.anything(),
+        "!sub:localhost",
+        "Renamed",
+        abortOptions(),
+      ),
     );
 
     vi.stubGlobal("confirm", () => true);
     await user.click(screen.getByTestId("delete-subfolder"));
     await waitFor(() =>
-      expect(core.deleteFolder).toHaveBeenCalledWith(expect.anything(), "!sub:localhost"),
+      expect(core.deleteFolder).toHaveBeenCalledWith(
+        expect.anything(),
+        "!sub:localhost",
+        abortOptions(),
+      ),
     );
     vi.unstubAllGlobals();
   });
@@ -440,15 +865,135 @@ describe("folder contents", () => {
     await openVault();
     expect(screen.getByTestId("details-panel")).toBeInTheDocument();
   });
+
+  it("uses vault details at the root and folder details for a selected subfolder", async () => {
+    vi.mocked(core.getVaultDetails).mockResolvedValue({
+      name: "Docs",
+      id: "!vault:localhost",
+      createdAt: null,
+      memberCount: 1,
+    });
+    vi.mocked(core.getFolderDetails).mockResolvedValue({
+      name: "Child",
+      id: "!sub:localhost",
+      createdAt: null,
+      memberCount: 1,
+    });
+    const user = await openVault("Docs", {
+      subfolders: [{ id: "!sub:localhost", name: "Child" }],
+    });
+
+    await waitFor(() =>
+      expect(core.getVaultDetails).toHaveBeenCalledWith(
+        expect.anything(),
+        "!vault:localhost",
+        abortOptions(),
+      ),
+    );
+    await user.click(screen.getByTestId("subfolder-item"));
+    await waitFor(() =>
+      expect(core.getFolderDetails).toHaveBeenCalledWith(
+        expect.anything(),
+        "!sub:localhost",
+        abortOptions(),
+      ),
+    );
+  });
 });
 
 describe("sharing", () => {
-  it("invites a user via core.shareFolder and shows them in the member list", async () => {
+  it("ignores member responses from a previously selected vault", async () => {
+    const membersA = deferred<Array<{ userId: string; role: string; membership: string }>>();
+    const membersB = deferred<Array<{ userId: string; role: string; membership: string }>>();
+    vi.mocked(core.listVaults).mockResolvedValue([
+      { id: "!a:localhost", name: "A" },
+      { id: "!b:localhost", name: "B" },
+    ]);
+    vi.mocked(core.listFiles).mockResolvedValue([]);
+    vi.mocked(core.listSubfolders).mockResolvedValue([]);
+    vi.mocked(core.getVaultDetails).mockResolvedValue({
+      name: "Vault",
+      id: "!vault:localhost",
+      createdAt: null,
+      memberCount: 1,
+    });
+    vi.mocked(core.listMembers).mockImplementation(async (_, id) =>
+      id === "!a:localhost" ? membersA.promise : membersB.promise,
+    );
+
+    const { user } = await loginAndReachVaults([
+      { id: "!a:localhost", name: "A" },
+      { id: "!b:localhost", name: "B" },
+    ]);
+    await user.click(screen.getByRole("button", { name: "A" }));
+    await screen.findByTestId("vault-detail");
+    await user.click(screen.getByRole("button", { name: "B" }));
+    membersA.resolve([{ userId: "@old:localhost", role: "viewer", membership: "join" }]);
+    await waitFor(() => expect(screen.queryByTestId("member-item")).not.toBeInTheDocument());
+
+    membersB.resolve([{ userId: "@new:localhost", role: "viewer", membership: "join" }]);
+    await waitFor(() =>
+      expect(screen.getByTestId("member-item")).toHaveAttribute("data-user-id", "@new:localhost"),
+    );
+  });
+
+  it("ignores a stale share completion after returning to the same vault", async () => {
+    const firstMembersA = deferred<Array<{ userId: string; role: string; membership: string }>>();
+    const membersB = deferred<Array<{ userId: string; role: string; membership: string }>>();
+    const secondMembersA = deferred<Array<{ userId: string; role: string; membership: string }>>();
+    const share = deferred<{ vaultId: string; userId: string; role: "editor" }>();
+    let callsA = 0;
+    vi.mocked(core.listVaults).mockResolvedValue([
+      { id: "!a:localhost", name: "A" },
+      { id: "!b:localhost", name: "B" },
+    ]);
+    vi.mocked(core.listFiles).mockResolvedValue([]);
+    vi.mocked(core.listSubfolders).mockResolvedValue([]);
+    vi.mocked(core.getVaultDetails).mockResolvedValue({
+      name: "Vault",
+      id: "!vault:localhost",
+      createdAt: null,
+      memberCount: 1,
+    });
+    vi.mocked(core.listMembers).mockImplementation(async (_, id) => {
+      if (id === "!a:localhost") {
+        callsA += 1;
+        return callsA === 1 ? firstMembersA.promise : secondMembersA.promise;
+      }
+      return membersB.promise;
+    });
+    vi.mocked(core.shareVault).mockReturnValue(share.promise);
+
+    const { user } = await loginAndReachVaults([
+      { id: "!a:localhost", name: "A" },
+      { id: "!b:localhost", name: "B" },
+    ]);
+    await user.click(screen.getByRole("button", { name: "A" }));
+    await screen.findByTestId("vault-detail");
+    await user.type(screen.getByTestId("share-user-id"), "@old:localhost");
+    const shareTask = user.click(screen.getByTestId("share-submit"));
+    await waitFor(() => expect(core.shareVault).toHaveBeenCalled());
+
+    await user.click(screen.getByRole("button", { name: "B" }));
+    await user.click(screen.getByRole("button", { name: "A" }));
+    const currentInput = await screen.findByTestId("share-user-id");
+    await user.type(currentInput, "@new:localhost");
+
+    share.resolve({ vaultId: "!a:localhost", userId: "@old:localhost", role: "editor" });
+    await shareTask;
+    await waitFor(() => expect(currentInput).toHaveValue("@new:localhost"));
+
+    firstMembersA.resolve([]);
+    membersB.resolve([]);
+    secondMembersA.resolve([]);
+  });
+
+  it("invites a user via core.shareVault and shows them in the member list", async () => {
     const user = await openVault();
     await screen.findByTestId("no-files");
 
-    vi.mocked(core.shareFolder).mockResolvedValue({
-      folderId: "!f:localhost",
+    vi.mocked(core.shareVault).mockResolvedValue({
+      vaultId: "!vault:localhost",
       userId: "@bob:localhost",
       role: "editor",
     });
@@ -459,23 +1004,24 @@ describe("sharing", () => {
     await user.type(screen.getByTestId("share-user-id"), "@bob:localhost");
     await user.click(screen.getByTestId("share-submit"));
 
-    expect(core.shareFolder).toHaveBeenCalledWith(
+    expect(core.shareVault).toHaveBeenCalledWith(
       expect.anything(),
-      "!f:localhost",
+      "!vault:localhost",
       "@bob:localhost",
       "editor",
+      abortOptions(),
     );
     expect(await screen.findByTestId("member-item")).toHaveAttribute("data-user-id", "@bob:localhost");
   });
 
-  it("removes a member via core.unshareFolder", async () => {
+  it("removes a member via core.unshareVault", async () => {
     const user = await openVault("Docs", {
       members: [{ userId: "@bob:localhost", role: "viewer", membership: "join" }],
     });
     await waitFor(() => expect(screen.getByTestId("member-item")).toBeInTheDocument());
 
-    vi.mocked(core.unshareFolder).mockResolvedValue({
-      folderId: "!f:localhost",
+    vi.mocked(core.unshareVault).mockResolvedValue({
+      vaultId: "!vault:localhost",
       userId: "@bob:localhost",
       removed: true,
     });
@@ -483,10 +1029,11 @@ describe("sharing", () => {
 
     await user.click(screen.getByTestId("unshare-member"));
 
-    expect(core.unshareFolder).toHaveBeenCalledWith(
+    expect(core.unshareVault).toHaveBeenCalledWith(
       expect.anything(),
-      "!f:localhost",
+      "!vault:localhost",
       "@bob:localhost",
+      abortOptions(),
     );
   });
 });
@@ -495,13 +1042,13 @@ describe("recovery", () => {
   it("sets up recovery, requires confirm saved, then dismisses key display", async () => {
     const { storage } = await loginAndReachVaults();
     vi.mocked(storage.keys.isRecoverySetup).mockResolvedValue(false);
-    vi.mocked(core.setupRecovery).mockResolvedValue({ recoveryKey: "EsTx 1234 5678" });
+    vi.mocked(storage.keys.setupRecovery).mockResolvedValue({ recoveryKey: "EsTx 1234 5678" });
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("nav-recovery"));
     await user.click(await screen.findByTestId("setup-recovery"));
 
-    expect(core.setupRecovery).toHaveBeenCalledWith(expect.anything());
+    expect(storage.keys.setupRecovery).toHaveBeenCalled();
     expect(await screen.findByTestId("recovery-key-value")).toHaveTextContent("EsTx 1234 5678");
     expect(screen.queryByTestId("restore-key-input")).not.toBeInTheDocument();
 
@@ -515,28 +1062,37 @@ describe("recovery", () => {
     expect(await screen.findByTestId("recovery-active")).toBeInTheDocument();
   });
 
-  it("restores from a pasted key when recovery is already set up", async () => {
-    const { storage } = await loginAndReachVaults();
-    vi.mocked(storage.keys.isRecoverySetup).mockResolvedValue(true);
-    vi.mocked(core.restoreRecovery).mockResolvedValue({ imported: 3, total: 3 });
+  it("restores from a pasted key when recovery is already configured", async () => {
+    const { storage } = await loginAndReachVaults([], true);
+    vi.mocked(storage.keys.restoreFromRecoveryKey).mockResolvedValue({ imported: 3, total: 3 });
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("nav-recovery"));
+    expect(await screen.findByTestId("recovery-active")).toHaveTextContent(
+      "Recovery is configured for this account.",
+    );
+    expect(screen.queryByTestId("setup-recovery")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /set up recovery/i })).not.toBeInTheDocument();
     await user.click(await screen.findByTestId("restore-expand"));
     await user.type(screen.getByTestId("restore-key-input"), "EsTx recovery key text");
     await user.click(screen.getByTestId("restore-submit"));
 
-    expect(core.restoreRecovery).toHaveBeenCalledWith(expect.anything(), "EsTx recovery key text");
+    expect(storage.keys.restoreFromRecoveryKey).toHaveBeenCalledWith(
+      "EsTx recovery key text",
+      expect.anything(),
+    );
     expect(await screen.findByTestId("restore-result")).toHaveTextContent("Imported 3 of 3");
   });
 
-  it("shows restore expandable on a device without local recovery setup", async () => {
+  it("shows restore expandable when account recovery is not configured", async () => {
     const { storage } = await loginAndReachVaults();
     vi.mocked(storage.keys.isRecoverySetup).mockResolvedValue(false);
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("nav-recovery"));
-    expect(await screen.findByTestId("recovery-not-setup")).toBeInTheDocument();
+    expect(await screen.findByTestId("recovery-not-setup")).toHaveTextContent(
+      "Recovery is not configured on this account.",
+    );
     expect(await screen.findByTestId("restore-expand")).toBeInTheDocument();
     expect(screen.queryByTestId("restore-key-input")).not.toBeInTheDocument();
   });

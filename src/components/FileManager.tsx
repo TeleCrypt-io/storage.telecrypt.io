@@ -1,219 +1,388 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStorage } from "../context/StorageContext";
 import * as core from "../lib/core";
-import type { FolderInfo } from "../lib/core";
+import type { FolderInfo, VaultInfo } from "../lib/core";
+import { formatOperationError } from "../lib/formatOperationError";
+import { withAccountSignal } from "../lib/accountOperation";
+import { MAX_FILE_NAME_BYTES, hasSafeRemoteNames, isSafeRemoteName } from "../lib/fileLimits";
 import { DetailsPanel, type Selection } from "./DetailsPanel";
-import { FolderContents } from "./FolderContents";
+import { VaultContents } from "./VaultContents";
 
 const POLL_MS = 2500;
 const UNTITLED = "Untitled vault";
 
-function uniqueUntitledName(existing: FolderInfo[]): string {
-  const names = new Set(existing.map((f) => f.name.toLowerCase()));
+function uniqueUntitledName(existing: VaultInfo[]): string {
+  const names = new Set(existing.map((vault) => vault.name.toLowerCase()));
   if (!names.has(UNTITLED.toLowerCase())) return UNTITLED;
   let i = 2;
   while (names.has(`${UNTITLED} ${i}`.toLowerCase())) i++;
   return `${UNTITLED} ${i}`;
 }
 
-export function FileManager({ onOpenRecovery }: { onOpenRecovery?: () => void }) {
-  const { storage } = useStorage();
-  const [folders, setFolders] = useState<FolderInfo[] | null>(null);
-  const [invites, setInvites] = useState<FolderInfo[] | null>(null);
+export function FileManager() {
+  const { storage, accountSignal } = useStorage();
+  const [vaults, setVaults] = useState<VaultInfo[] | null>(null);
+  const [invites, setInvites] = useState<VaultInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [rootFolder, setRootFolder] = useState<FolderInfo | null>(null);
-  const [ownedFolderIds, setOwnedFolderIds] = useState<Set<string>>(new Set());
-  const [subPath, setSubPath] = useState<FolderInfo[]>([]);
+  const [rootVault, setRootVault] = useState<VaultInfo | null>(null);
+  const [ownedVaultIds, setOwnedVaultIds] = useState<Set<string>>(new Set());
+  const [folderPath, setFolderPath] = useState<FolderInfo[]>([]);
   const [sidebarRenaming, setSidebarRenaming] = useState<{ id: string; name: string } | null>(
     null,
   );
   const [selection, setSelection] = useState<Selection>(null);
-  const [recoveryNeeded, setRecoveryNeeded] = useState(false);
+  const storageRef = useRef<typeof storage>(null);
+  const storageGenerationRef = useRef(0);
+  const refreshRequestRef = useRef(0);
+  const navigationGenerationRef = useRef(0);
+  const mutationInflightRef = useRef(false);
+  const rootVaultRef = useRef<VaultInfo | null>(null);
+  // Keep identity and root selection current during render so callbacks cannot observe a prior
+  // account between render and effect cleanup.
+  // oxlint-disable-next-line react/refs
+  storageRef.current = storage;
+  // oxlint-disable-next-line react/refs
+  rootVaultRef.current = rootVault;
 
-  const refreshFolders = useCallback(async () => {
+  // Clear account-specific navigation state before the next identity's asynchronous refresh
+  // completes.
+  // oxlint-disable react/set-state-in-effect
+  useEffect(() => {
+    storageRef.current = storage;
+    storageGenerationRef.current += 1;
+    refreshRequestRef.current += 1;
+    navigationGenerationRef.current += 1;
+    mutationInflightRef.current = false;
+    rootVaultRef.current = null;
+    setVaults(null);
+    setInvites(null);
+    setOwnedVaultIds(new Set());
+    setRootVault(null);
+    setFolderPath([]);
+    setSelection(null);
+    setSidebarRenaming(null);
+    setError(null);
+    return () => {
+      storageGenerationRef.current += 1;
+      refreshRequestRef.current += 1;
+    };
+  }, [storage]);
+  // oxlint-enable react/set-state-in-effect
+
+  function isCurrentStorage(
+    expectedStorage: typeof storage,
+    generation: number,
+    request?: number,
+  ): boolean {
+    return (
+      !(accountSignal?.aborted ?? false) &&
+      storageRef.current === expectedStorage &&
+      storageGenerationRef.current === generation &&
+      (request === undefined || refreshRequestRef.current === request)
+    );
+  }
+
+  const clearSelectedRoot = useCallback(() => {
+    navigationGenerationRef.current += 1;
+    rootVaultRef.current = null;
+    setRootVault(null);
+    setFolderPath([]);
+    setSelection(null);
+    setSidebarRenaming(null);
+  }, []);
+
+  const refreshVaults = useCallback(async () => {
     if (!storage) return;
+    const expectedStorage = storage;
+    const generation = storageGenerationRef.current;
+    const request = ++refreshRequestRef.current;
     try {
       const [result, pending] = await Promise.all([
-        core.listFolders(storage),
-        core.listPendingInvites(storage),
+        withAccountSignal(accountSignal, () =>
+          core.listVaults(expectedStorage, { signal: accountSignal ?? undefined }),
+        ),
+        withAccountSignal(accountSignal, () =>
+          core.listPendingInvites(expectedStorage, { signal: accountSignal ?? undefined }),
+        ),
       ]);
-      setFolders(result);
+      if (!isCurrentStorage(expectedStorage, generation, request)) return;
+      if (!hasSafeRemoteNames(result) || !hasSafeRemoteNames(pending)) {
+        throw new Error("Remote vault data is invalid");
+      }
+      setVaults(result);
       setInvites(pending);
-      setOwnedFolderIds(
+      setError(null);
+      const selectedRoot = rootVaultRef.current;
+      const refreshedRoot = selectedRoot && result.find((vault) => vault.id === selectedRoot.id);
+      if (selectedRoot && !refreshedRoot) {
+        clearSelectedRoot();
+      } else if (selectedRoot && refreshedRoot && refreshedRoot.name !== selectedRoot.name) {
+        rootVaultRef.current = refreshedRoot;
+        setRootVault(refreshedRoot);
+      }
+      setOwnedVaultIds(
         new Set(
-          result
-            .filter((folder) => core.getMyFolderRole(storage, folder.id) === "owner")
-            .map((folder) => folder.id),
+          result.filter((vault) => core.isVaultOwner(expectedStorage, vault.id)).map((vault) => vault.id),
         ),
       );
     } catch (err) {
-      setError((err as Error).message);
+      if (isCurrentStorage(expectedStorage, generation, request)) {
+        setOwnedVaultIds(new Set());
+        setVaults(null);
+        setInvites(null);
+        clearSelectedRoot();
+        setError(formatOperationError(err));
+      }
     }
-  }, [storage]);
+  // isCurrentStorage is intentionally a render-local identity guard.
+  // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountSignal, clearSelectedRoot, storage]);
 
   useEffect(() => {
-    void refreshFolders();
-    const timer = setInterval(() => void refreshFolders(), POLL_MS);
-    return () => clearInterval(timer);
-  }, [refreshFolders]);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      await refreshVaults();
+      if (!stopped) timer = setTimeout(() => void poll(), POLL_MS);
+    };
+    // The refresh callback is guarded before every state update.
+    // oxlint-disable-next-line react/set-state-in-effect
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [refreshVaults]);
 
-  useEffect(() => {
-    if (!storage) return;
-    void storage.keys.isRecoverySetup().then((ok) => setRecoveryNeeded(!ok));
-  }, [storage]);
+  const currentFolder = folderPath[folderPath.length - 1];
+  const currentTree = currentFolder ?? rootVault;
 
-  const currentFolder =
-    subPath.length > 0 ? subPath[subPath.length - 1]! : rootFolder;
-
-  const breadcrumb: FolderInfo[] = rootFolder
-    ? [rootFolder, ...subPath.slice(0, -1)]
+  const breadcrumb: Array<VaultInfo | FolderInfo> = rootVault
+    ? [rootVault, ...folderPath.slice(0, -1)]
     : [];
 
-  function selectRoot(folder: FolderInfo) {
-    setRootFolder(folder);
-    setSubPath([]);
+  function selectRoot(vault: VaultInfo) {
+    navigationGenerationRef.current += 1;
+    rootVaultRef.current = vault;
+    setRootVault(vault);
+    setFolderPath([]);
     setSelection(null);
   }
 
   function openSubfolder(sub: FolderInfo) {
-    setSubPath((prev) => [...prev, sub]);
+    navigationGenerationRef.current += 1;
+    setFolderPath((prev) => [...prev, sub]);
     setSelection(null);
   }
 
   function navigateBreadcrumb(index: number) {
+    navigationGenerationRef.current += 1;
     if (index === 0) {
-      setSubPath([]);
+      setFolderPath([]);
     } else {
-      setSubPath((prev) => prev.slice(0, index));
+      setFolderPath((prev) => prev.slice(0, index));
     }
     setSelection(null);
   }
 
   function handleNavUp() {
-    if (subPath.length > 0) {
-      setSubPath((prev) => prev.slice(0, -1));
+    navigationGenerationRef.current += 1;
+    if (folderPath.length > 0) {
+      setFolderPath((prev) => prev.slice(0, -1));
     } else {
-      setRootFolder(null);
+      rootVaultRef.current = null;
+      setRootVault(null);
     }
     setSelection(null);
+  }
+
+  function handleVaultRenamed(vaultId: string, name: string) {
+    if (rootVaultRef.current?.id === vaultId) {
+      setRootVault((current) => (current?.id === vaultId ? { ...current, name } : current));
+    }
+    void refreshVaults();
   }
 
   function handleFolderRenamed(folderId: string, name: string) {
-    if (rootFolder?.id === folderId) {
-      setRootFolder({ ...rootFolder, name });
-    }
-    setSubPath((prev) => prev.map((f) => (f.id === folderId ? { ...f, name } : f)));
-    void refreshFolders();
+    setFolderPath((prev) =>
+      prev.map((folder) => (folder.id === folderId ? { ...folder, name } : folder)),
+    );
   }
 
   function handleFolderDeleted(folderId: string) {
-    if (currentFolder?.id === folderId) {
-      if (subPath.length > 0) {
-        setSubPath((prev) => prev.slice(0, -1));
-      } else {
-        setRootFolder(null);
-      }
-    }
-    if (rootFolder?.id === folderId) {
-      setRootFolder(null);
-      setSubPath([]);
-    }
+    navigationGenerationRef.current += 1;
+    const index = folderPath.findIndex((folder) => folder.id === folderId);
+    if (index >= 0) setFolderPath((prev) => prev.slice(0, index));
     setSelection(null);
-    void refreshFolders();
   }
 
   async function handleNewVault() {
+    const expectedStorage = storage;
+    const generation = storageGenerationRef.current;
+    const navigationGeneration = navigationGenerationRef.current;
+    if (
+      !expectedStorage ||
+      !isCurrentStorage(expectedStorage, generation) ||
+      mutationInflightRef.current
+    ) return;
+    mutationInflightRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      const name = uniqueUntitledName(folders ?? []);
-      const created = await core.createFolder(storage!, name);
-      setFolders((prev) => [...(prev ?? []), created]);
-      setOwnedFolderIds((prev) => new Set(prev).add(created.id));
-      selectRoot(created);
-      setSidebarRenaming({ id: created.id, name: created.name });
-      void refreshFolders();
+      const name = uniqueUntitledName(vaults ?? []);
+      const created = await withAccountSignal(accountSignal, () =>
+        core.createVault(expectedStorage, name, { signal: accountSignal ?? undefined }),
+      );
+      if (!isCurrentStorage(expectedStorage, generation)) return;
+      if (!isSafeRemoteName(created.name)) throw new Error("Remote vault data is invalid");
+      setVaults((prev) => [...(prev ?? []), created]);
+      setOwnedVaultIds((prev) => new Set(prev).add(created.id));
+      if (navigationGenerationRef.current === navigationGeneration) {
+        selectRoot(created);
+        setSidebarRenaming({ id: created.id, name: created.name });
+      }
+      void refreshVaults();
     } catch (err) {
-      setError((err as Error).message);
+      if (isCurrentStorage(expectedStorage, generation)) setError(formatOperationError(err));
     } finally {
-      setBusy(false);
+      if (storageGenerationRef.current === generation) mutationInflightRef.current = false;
+      if (isCurrentStorage(expectedStorage, generation)) setBusy(false);
     }
   }
 
   async function commitSidebarRename() {
     if (!sidebarRenaming) return;
-    const trimmed = sidebarRenaming.name.trim();
+    const expectedStorage = storage;
+    const generation = storageGenerationRef.current;
+    const target = sidebarRenaming;
+    if (
+      !expectedStorage ||
+      !isCurrentStorage(expectedStorage, generation) ||
+      mutationInflightRef.current
+    ) return;
+    const trimmed = target.name.trim();
     if (!trimmed) {
       setSidebarRenaming(null);
       return;
     }
+    if (!isSafeRemoteName(trimmed)) {
+      setSidebarRenaming(null);
+      setError("The vault name is invalid or too long.");
+      return;
+    }
+    if (!core.isVaultOwner(expectedStorage, target.id)) return;
+    mutationInflightRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      await core.renameFolder(storage!, sidebarRenaming.id, trimmed);
-      handleFolderRenamed(sidebarRenaming.id, trimmed);
+      await withAccountSignal(accountSignal, () =>
+        core.renameVault(expectedStorage, target.id, trimmed, { signal: accountSignal ?? undefined }),
+      );
+      if (!isCurrentStorage(expectedStorage, generation) || !core.isVaultOwner(expectedStorage, target.id)) return;
+      handleVaultRenamed(target.id, trimmed);
     } catch (err) {
-      setError((err as Error).message);
+      if (isCurrentStorage(expectedStorage, generation)) setError(formatOperationError(err));
     } finally {
-      setBusy(false);
-      setSidebarRenaming(null);
+      if (storageGenerationRef.current === generation) mutationInflightRef.current = false;
+      if (isCurrentStorage(expectedStorage, generation)) {
+        setBusy(false);
+        setSidebarRenaming(null);
+      }
     }
   }
 
-  async function handleDeleteVault(folder: FolderInfo) {
-    if (!confirm(`Delete vault "${folder.name}" and everything inside it?`)) return;
+  async function handleDeleteVault(vault: VaultInfo) {
+    const expectedStorage = storage;
+    const generation = storageGenerationRef.current;
+    if (
+      !expectedStorage ||
+      !isCurrentStorage(expectedStorage, generation) ||
+      mutationInflightRef.current
+    ) return;
+    if (!core.isVaultOwner(expectedStorage, vault.id)) return;
+    if (!confirm(`Delete vault "${vault.name}" and everything inside it?`)) return;
+    mutationInflightRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      await core.deleteFolder(storage!, folder.id);
-      if (rootFolder?.id === folder.id) {
-        setRootFolder(null);
-        setSubPath([]);
+      await withAccountSignal(accountSignal, () =>
+        core.deleteVault(expectedStorage, vault.id, { signal: accountSignal ?? undefined }),
+      );
+      if (!isCurrentStorage(expectedStorage, generation) || !core.isVaultOwner(expectedStorage, vault.id)) return;
+      if (rootVaultRef.current?.id === vault.id) {
+        rootVaultRef.current = null;
+        setRootVault(null);
+        setFolderPath([]);
         setSelection(null);
       }
-      await refreshFolders();
+      await refreshVaults();
     } catch (err) {
-      setError((err as Error).message);
+      if (isCurrentStorage(expectedStorage, generation)) setError(formatOperationError(err));
     } finally {
-      setBusy(false);
+      if (storageGenerationRef.current === generation) mutationInflightRef.current = false;
+      if (isCurrentStorage(expectedStorage, generation)) setBusy(false);
     }
   }
 
-  async function handleAcceptInvite(folderId: string) {
+  async function handleAcceptInvite(vaultId: string) {
+    const expectedStorage = storage;
+    const generation = storageGenerationRef.current;
+    if (
+      !expectedStorage ||
+      !isCurrentStorage(expectedStorage, generation) ||
+      mutationInflightRef.current
+    ) return;
+    mutationInflightRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      await core.joinFolder(storage!, folderId);
-      await refreshFolders();
+      await withAccountSignal(accountSignal, () =>
+        core.joinVault(expectedStorage, vaultId, { signal: accountSignal ?? undefined }),
+      );
+      if (!isCurrentStorage(expectedStorage, generation)) return;
+      await refreshVaults();
     } catch (err) {
-      setError((err as Error).message);
+      if (isCurrentStorage(expectedStorage, generation)) setError(formatOperationError(err));
     } finally {
-      setBusy(false);
+      if (storageGenerationRef.current === generation) mutationInflightRef.current = false;
+      if (isCurrentStorage(expectedStorage, generation)) setBusy(false);
     }
   }
 
-  async function handleDeclineInvite(folderId: string) {
+  async function handleDeclineInvite(vaultId: string) {
+    const expectedStorage = storage;
+    const generation = storageGenerationRef.current;
+    if (
+      !expectedStorage ||
+      !isCurrentStorage(expectedStorage, generation) ||
+      mutationInflightRef.current
+    ) return;
+    mutationInflightRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      await core.declineInvite(storage!, folderId);
-      await refreshFolders();
+      await withAccountSignal(accountSignal, () =>
+        core.declineInvite(expectedStorage, vaultId, { signal: accountSignal ?? undefined }),
+      );
+      if (!isCurrentStorage(expectedStorage, generation)) return;
+      await refreshVaults();
     } catch (err) {
-      setError((err as Error).message);
+      if (isCurrentStorage(expectedStorage, generation)) setError(formatOperationError(err));
     } finally {
-      setBusy(false);
+      if (storageGenerationRef.current === generation) mutationInflightRef.current = false;
+      if (isCurrentStorage(expectedStorage, generation)) setBusy(false);
     }
   }
 
   return (
     <div className="file-manager" data-testid="file-manager">
-      <aside className="folder-sidebar">
+      <aside className="vault-sidebar">
         <h2 className="sidebar-title">Vaults</h2>
 
         <button
           type="button"
-          className="btn btn-primary sidebar-new-folder"
+          className="btn btn-primary sidebar-new-vault"
           onClick={() => void handleNewVault()}
           disabled={busy}
           data-testid="create-vault"
@@ -230,7 +399,7 @@ export function FileManager({ onOpenRecovery }: { onOpenRecovery?: () => void })
                   key={inv.id}
                   className="invite-item"
                   data-testid="invite-item"
-                  data-folder-id={inv.id}
+                  data-vault-id={inv.id}
                 >
                   <span className="invite-name">{inv.name}</span>
                   <div className="invite-actions">
@@ -260,24 +429,26 @@ export function FileManager({ onOpenRecovery }: { onOpenRecovery?: () => void })
         )}
 
         {error && (
-          <p className="error" data-testid="folder-list-error">
+          <p className="error" data-testid="vault-list-error">
             {error}
           </p>
         )}
 
-        {folders === null ? (
+        {vaults === null ? (
           <p className="muted">Loading…</p>
-        ) : folders.length === 0 ? (
+        ) : vaults.length === 0 ? (
           <p className="muted" data-testid="no-vaults">
             No vaults yet.
           </p>
         ) : (
-          <ul className="folder-list" data-testid="vault-list">
-            {folders.map((f) => (
-              <li key={f.id} data-testid="vault-item" data-folder-id={f.id}>
-                {sidebarRenaming?.id === f.id ? (
+          <ul className="vault-list" data-testid="vault-list">
+            {vaults.map((vault) => (
+              <li key={vault.id} data-testid="vault-item" data-vault-id={vault.id}>
+                {sidebarRenaming?.id === vault.id ? (
                   <input
                     className="rename-input sidebar-rename"
+                    maxLength={MAX_FILE_NAME_BYTES}
+                    aria-label={`Rename vault ${vault.name}`}
                     value={sidebarRenaming.name}
                     autoFocus
                     onChange={(e) =>
@@ -293,13 +464,13 @@ export function FileManager({ onOpenRecovery }: { onOpenRecovery?: () => void })
                 ) : (
                   <button
                     type="button"
-                    className={`folder-list-btn${rootFolder?.id === f.id ? " active" : ""}`}
-                    onClick={() => selectRoot(f)}
+                    className={`vault-list-btn${rootVault?.id === vault.id ? " active" : ""}`}
+                    onClick={() => selectRoot(vault)}
                   >
-                    {f.name}
+                    {vault.name}
                   </button>
                 )}
-                {ownedFolderIds.has(f.id) && sidebarRenaming?.id !== f.id && (
+                {ownedVaultIds.has(vault.id) && sidebarRenaming?.id !== vault.id && (
                   <div className="vault-actions">
                     <button
                       type="button"
@@ -307,7 +478,7 @@ export function FileManager({ onOpenRecovery }: { onOpenRecovery?: () => void })
                       disabled={busy}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSidebarRenaming({ id: f.id, name: f.name });
+                        setSidebarRenaming({ id: vault.id, name: vault.name });
                       }}
                       data-testid="rename-vault"
                     >
@@ -319,7 +490,7 @@ export function FileManager({ onOpenRecovery }: { onOpenRecovery?: () => void })
                       disabled={busy}
                       onClick={(e) => {
                         e.stopPropagation();
-                        void handleDeleteVault(f);
+                        void handleDeleteVault(vault);
                       }}
                       data-testid="delete-vault"
                     >
@@ -333,26 +504,16 @@ export function FileManager({ onOpenRecovery }: { onOpenRecovery?: () => void })
         )}
       </aside>
 
-      <section className="folder-main">
-        {recoveryNeeded && onOpenRecovery && (
-          <div className="recovery-banner" data-testid="recovery-banner">
-            <span>Protect this account — set up recovery</span>
-            <button type="button" className="btn btn-sm" onClick={onOpenRecovery}>
-              Set up recovery
-            </button>
-          </div>
-        )}
-
-        {!currentFolder ? (
+      <section className="vault-main">
+        {!currentTree ? (
           <div className="empty-panel muted" data-testid="select-vault-prompt">
             Select or create a vault to browse files.
           </div>
         ) : (
-          <FolderContents
-            folderId={currentFolder.id}
-            folderName={currentFolder.name}
-            breadcrumb={[...breadcrumb, ...(subPath.length ? [currentFolder] : [])]}
-            isVaultRoot={subPath.length === 0}
+          <VaultContents
+            treeId={currentTree.id}
+            breadcrumb={[...breadcrumb, ...(currentFolder ? [currentFolder] : [])]}
+            isVaultRoot={folderPath.length === 0}
             onNavigate={navigateBreadcrumb}
             onNavUp={handleNavUp}
             onOpenSubfolder={openSubfolder}
@@ -364,8 +525,12 @@ export function FileManager({ onOpenRecovery }: { onOpenRecovery?: () => void })
         )}
       </section>
 
-      {currentFolder && (
-        <DetailsPanel folderId={currentFolder.id} selection={selection} />
+      {currentTree && (
+        <DetailsPanel
+          treeId={currentTree.id}
+          isVaultRoot={folderPath.length === 0}
+          selection={selection}
+        />
       )}
     </div>
   );

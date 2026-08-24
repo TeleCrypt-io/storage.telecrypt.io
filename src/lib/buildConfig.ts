@@ -1,60 +1,54 @@
 /**
- * Public, non-secret settings are loaded after the static bundle starts. This
- * keeps the JavaScript identical between environments while allowing each
- * environment to serve its own runtime-settings.json.
+ * Derive the only permitted Matrix homeserver from the page origin. There is
+ * deliberately no external configuration file: a static artifact must not carry a
+ * second, independently mutable environment selector.
  */
 export interface RuntimeSettings {
   homeserver: string;
+  serverName: string;
 }
 
-const developmentSettings: RuntimeSettings = {
-  homeserver: "http://localhost:8008",
-};
+const STORAGE_HOST_PATTERN = /^storage(?:\.(stage))?\.telecrypt\.io$/;
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const DEVELOPMENT_HOMESERVER = "http://localhost:8008";
 
-let runtimeSettings: RuntimeSettings | null = import.meta.env.DEV ? developmentSettings : null;
-
-function canonicalTeleCryptUrl(name: string, value: unknown, expectedPath: string): string {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`${name} must be a non-empty URL`);
-  }
-
-  let parsed: URL;
+function deriveRuntimeSettings(origin: string, development: boolean): RuntimeSettings {
+  let page: URL;
   try {
-    parsed = new URL(value);
+    page = new URL(origin);
   } catch {
-    throw new Error(`${name} must be a valid URL`);
+    throw new Error("Storage page origin is invalid");
   }
 
+  const hostname = page.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (
-    parsed.protocol !== "https:" ||
-    parsed.username !== "" ||
-    parsed.password !== "" ||
-    parsed.search !== "" ||
-    parsed.hash !== "" ||
-    parsed.port !== "" ||
-    (parsed.hostname !== "telecrypt.io" && !parsed.hostname.endsWith(".telecrypt.io"))
+    development &&
+    page.protocol === "http:" &&
+    page.username === "" &&
+    page.password === "" &&
+    LOOPBACK_HOSTS.has(hostname)
   ) {
-    throw new Error(`${name} must be a canonical HTTPS TeleCrypt URL`);
+    // The disposable Matrix fixture is configured with the canonical `localhost`
+    // server name even when the browser reaches it through another loopback alias.
+    return { homeserver: DEVELOPMENT_HOMESERVER, serverName: "localhost" };
+  }
+  if (
+    page.protocol !== "https:" ||
+    page.username !== "" ||
+    page.password !== "" ||
+    page.port !== ""
+  ) {
+    throw new Error("Storage page must use canonical HTTPS TeleCrypt hosting");
   }
 
-  if (parsed.pathname !== expectedPath) {
-    throw new Error(`${name} must use the canonical ${expectedPath} path`);
+  const match = hostname.match(STORAGE_HOST_PATTERN);
+  if (!match) {
+    throw new Error("Storage page host is not an allowed TeleCrypt environment");
   }
-
-  const canonical = expectedPath === "/" ? parsed.origin : `${parsed.origin}${expectedPath}`;
-  if (value !== canonical) {
-    throw new Error(`${name} must use canonical spelling: ${canonical}`);
-  }
-  return canonical;
-}
-
-export function validateRuntimeSettings(value: unknown): RuntimeSettings {
-  if (!value || typeof value !== "object") {
-    throw new Error("Runtime settings must be a JSON object");
-  }
-  const raw = value as Partial<RuntimeSettings>;
-  const homeserver = canonicalTeleCryptUrl("homeserver", raw.homeserver, "/");
-  return { homeserver };
+  return {
+    homeserver: `https://backend${match[1] ? `.${match[1]}` : ""}.telecrypt.io`,
+    serverName: `${match[1] ? `${match[1]}.` : ""}telecrypt.io`,
+  };
 }
 
 export function runtimeOidcIssuer(): string {
@@ -62,8 +56,7 @@ export function runtimeOidcIssuer(): string {
 }
 
 export function getRuntimeSettings(): RuntimeSettings {
-  if (!runtimeSettings) throw new Error("Runtime settings have not been loaded");
-  return runtimeSettings;
+  return deriveRuntimeSettings(window.location.origin, import.meta.env.DEV);
 }
 
 export function assertRuntimeOidcEndpoint(value: unknown, name: string): string {
@@ -89,27 +82,4 @@ export function assertRuntimeOidcEndpoint(value: unknown, name: string): string 
     throw new Error(`${name} must remain on the configured OIDC origin and /auth/ path`);
   }
   return value;
-}
-
-export async function fetchRuntimeSettings(
-  fetchSettings: typeof fetch = fetch,
-  origin: string = window.location.origin,
-): Promise<RuntimeSettings> {
-  const settingsUrl = new URL("/runtime-settings.json", origin);
-  const response = await fetchSettings(settingsUrl, {
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-  if (!response.ok) {
-    throw new Error(`Runtime settings request failed with HTTP ${response.status}`);
-  }
-  return validateRuntimeSettings(await response.json());
-}
-
-export async function loadRuntimeSettings(): Promise<void> {
-  if (import.meta.env.DEV) {
-    runtimeSettings = developmentSettings;
-    return;
-  }
-  runtimeSettings = await fetchRuntimeSettings();
 }

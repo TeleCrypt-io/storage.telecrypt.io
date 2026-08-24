@@ -9,13 +9,14 @@ const RecoveryPanel = lazy(async () => ({
   default: (await import("./components/RecoveryPanel")).RecoveryPanel,
 }));
 
-type View = "folders" | "recovery";
+type View = "vaults" | "recovery";
 
 function ConnectingScreen() {
   const { error, connectLog } = useStorage();
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const startedAt = connectLog[0]?.at ?? now;
 
+  // oxlint-disable react/set-state-in-effect
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(id);
@@ -54,14 +55,8 @@ function ConnectingScreen() {
 }
 
 function Shell() {
-  const { status, session, error, logout, storage } = useStorage();
-  const [view, setView] = useState<View>("folders");
-  const [recoverySetup, setRecoverySetup] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    if (status !== "ready" || !storage) return;
-    void storage.keys.isRecoverySetup().then(setRecoverySetup);
-  }, [status, storage]);
+  const { status, session, error, logout, logoutPending } = useStorage();
+  const [view, setView] = useState<View>("vaults");
 
   if (status === "signed-out" || status === "error") {
     return <LoginScreen />;
@@ -70,8 +65,6 @@ function Shell() {
   if (status === "connecting") {
     return <ConnectingScreen />;
   }
-
-  const recoveryNeedsAttention = recoverySetup === false;
 
   return (
     <div className="app">
@@ -83,23 +76,29 @@ function Shell() {
         <nav>
           <button
             type="button"
-            className={view === "folders" ? "active" : ""}
-            onClick={() => setView("folders")}
-            data-testid="nav-folders"
+            className={view === "vaults" ? "active" : ""}
+            onClick={() => setView("vaults")}
+            data-testid="nav-vaults"
           >
             Files
           </button>
           <button
             type="button"
-            className={`${view === "recovery" ? "active" : ""}${recoveryNeedsAttention ? " needs-attention" : ""}`}
+            className={view === "recovery" ? "active" : ""}
             onClick={() => setView("recovery")}
             data-testid="nav-recovery"
           >
-            {recoveryNeedsAttention ? "Set up recovery" : "Recovery"}
+            Recovery
           </button>
         </nav>
-        <button type="button" className="link" onClick={logout} data-testid="logout">
-          Log out
+        <button
+          type="button"
+          className="link"
+          onClick={() => void logout()}
+          disabled={logoutPending}
+          data-testid="logout"
+        >
+          {logoutPending ? "Logging out…" : "Log out"}
         </button>
       </header>
       <main className="app-main">
@@ -114,8 +113,8 @@ function Shell() {
               <RecoveryPanel />
             </div>
           )}
-          {view === "folders" && (
-            <FileManager onOpenRecovery={() => setView("recovery")} />
+          {view === "vaults" && (
+            <FileManager />
           )}
         </Suspense>
       </main>

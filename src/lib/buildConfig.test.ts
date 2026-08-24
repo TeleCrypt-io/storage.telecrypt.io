@@ -1,78 +1,57 @@
-import { describe, expect, it } from "vitest";
-import {
-  fetchRuntimeSettings,
-  getRuntimeSettings,
-  runtimeOidcIssuer,
-  validateRuntimeSettings,
-} from "./buildConfig";
+import { beforeEach, describe, expect, it } from "vitest";
+import { getRuntimeSettings, runtimeOidcIssuer } from "./buildConfig";
 
-describe("validateRuntimeSettings", () => {
-  it("accepts one canonical backend origin and derives its MAS issuer", () => {
-    expect(
-      validateRuntimeSettings({
-        homeserver: "https://backend.telecrypt.io",
-      }),
-    ).toEqual({
-      homeserver: "https://backend.telecrypt.io",
+function setOrigin(origin: string): void {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { origin },
+  });
+}
+
+beforeEach(() => {
+  setOrigin("https://storage.telecrypt.io");
+});
+
+describe("page-bound environment", () => {
+  it("maps production storage hosting to the production backend", async () => {
+    expect(getRuntimeSettings()).toEqual({ homeserver: "https://backend.telecrypt.io", serverName: "telecrypt.io" });
+  });
+
+  it("maps the future stage hosting to the matching backend", async () => {
+    setOrigin("https://storage.stage.telecrypt.io");
+    expect(getRuntimeSettings()).toEqual({
+      homeserver: "https://backend.stage.telecrypt.io",
+      serverName: "stage.telecrypt.io",
     });
   });
 
+  it("allows only explicit loopback development", async () => {
+    setOrigin("http://localhost:5173");
+    expect(getRuntimeSettings()).toEqual({ homeserver: "http://localhost:8008", serverName: "localhost" });
+
+    setOrigin("http://127.0.0.1:5173");
+    expect(getRuntimeSettings()).toEqual({ homeserver: "http://localhost:8008", serverName: "localhost" });
+  });
+
   it.each([
-    [
-      "a noncanonical homeserver trailing slash",
-      { homeserver: "https://backend.telecrypt.io/" },
-    ],
-    [
-      "an HTTP homeserver",
-      { homeserver: "http://backend.telecrypt.io" },
-    ],
-    [
-      "a homeserver path",
-      { homeserver: "https://backend.telecrypt.io/matrix" },
-    ],
-    [
-      "a non-TeleCrypt host",
-      { homeserver: "https://backend.example.test" },
-    ],
-    [
-      "a URL with a query",
-      { homeserver: "https://backend.telecrypt.io?x=1" },
-    ],
-  ])("rejects %s", (_description, value) => {
-    expect(() => validateRuntimeSettings(value)).toThrow();
-  });
-});
-
-describe("fetchRuntimeSettings", () => {
-  it("loads valid settings without cache or cross-origin credentials", async () => {
-    const fetchSettings = async (input: URL | RequestInfo, init?: RequestInit) => {
-      expect(String(input)).toBe("https://storage-preproduction.telecrypt.io/runtime-settings.json");
-      expect(init).toEqual({ cache: "no-store", credentials: "same-origin" });
-      return new Response(JSON.stringify({
-        homeserver: "https://backend-preproduction.telecrypt.io",
-      }), { status: 200 });
-    };
-    await expect(fetchRuntimeSettings(fetchSettings, "https://storage-preproduction.telecrypt.io"))
-      .resolves.toEqual({
-        homeserver: "https://backend-preproduction.telecrypt.io",
-      });
-  });
-
-  it("fails closed for an unavailable or invalid settings response", async () => {
-    const unavailable = async () => new Response("missing", { status: 404 });
-    await expect(fetchRuntimeSettings(unavailable, "https://storage.telecrypt.io"))
-      .rejects.toThrow("HTTP 404");
-
-    const invalid = async () => new Response(JSON.stringify({
-      homeserver: "https://backend.example.test",
-    }), { status: 200 });
-    await expect(fetchRuntimeSettings(invalid, "https://storage.telecrypt.io"))
-      .rejects.toThrow("TeleCrypt");
+    "https://evil.telecrypt.io",
+    "https://storage.preview.telecrypt.io",
+    "https://storage.test.telecrypt.io",
+    "https://storage.a.telecrypt.io",
+    "https://storage.region.extra.telecrypt.io",
+    "https://storage--stage.telecrypt.io",
+    "https://storage-stage.telecrypt.io",
+    "http://storage.telecrypt.io",
+    "https://storage.telecrypt.io:8443",
+    "http://user@localhost:5173",
+  ])("rejects an unapproved page origin: %s", async (origin) => {
+    setOrigin(origin);
+    expect(() => getRuntimeSettings()).toThrow();
   });
 });
 
 describe("runtimeOidcIssuer", () => {
-  it("derives the canonical MAS path from runtime settings", () => {
-    expect(runtimeOidcIssuer()).toBe(`${getRuntimeSettings().homeserver}/auth/`);
+  it("derives the canonical MAS path from the page-bound backend", async () => {
+    expect(runtimeOidcIssuer()).toBe("https://backend.telecrypt.io/auth/");
   });
 });

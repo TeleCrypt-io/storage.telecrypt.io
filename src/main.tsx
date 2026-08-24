@@ -8,17 +8,17 @@ import { createRoot } from "react-dom/client";
 import "./theme.css";
 import "./index.css";
 import App from "./App.tsx";
-import { loadRuntimeSettings } from "./lib/buildConfig";
+import { getRuntimeSettings } from "./lib/buildConfig";
 
 async function bootstrap(): Promise<void> {
   const root = document.getElementById("root")!;
   try {
-    await loadRuntimeSettings();
+    getRuntimeSettings();
   } catch (error) {
-    // Do not render a login screen or accept a saved session until the
-    // environment binding has been fetched and validated successfully.
-    console.error("Storage runtime settings are invalid or unavailable", error);
-    root.textContent = "Storage is unavailable: invalid or missing runtime settings.";
+    // Do not render a login screen or accept a saved session until the page
+    // origin has been bound to an allowed environment.
+    console.error("Storage page environment is invalid", error);
+    root.textContent = "Storage is unavailable: this page is not an allowed TeleCrypt environment.";
     return;
   }
 

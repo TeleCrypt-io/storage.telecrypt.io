@@ -17,5 +17,5 @@ test("OIDC/MAS login: authorization-code + PKCE round trip through the real MAS 
 
   // Prove the OIDC-sourced token is a genuinely usable, fully-functional
   // storage session, not just "whoami succeeded".
-  await createVault(page, "OIDC Folder");
+  await createVault(page, "OIDC Vault");
 });

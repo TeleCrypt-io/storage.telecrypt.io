@@ -1,8 +1,13 @@
 # storage.telecrypt.io
 
 The static React/Vite site served at [storage.telecrypt.io](https://storage.telecrypt.io).
-It uses the exact published `@telecrypt-io/storage@0.3.0` browser library; storage protocol,
-cryptography, and the command-line client deliberately live in their own repositories.
+It is prepared for the exact required `@telecrypt-io/storage@0.5.0` browser library; that release
+and its npm lock integrity must be published and recorded before a site release can proceed.
+Until then, the missing lock integrity is an explicit release-order blocker, not a value to guess.
+The release and verification workflows fail before dependency installation while that gate remains
+unmet.
+Storage protocol, cryptography, and the command-line client deliberately live in their own
+repositories.
 
 ## Source boundaries
 
@@ -16,29 +21,55 @@ The web client uses MAS/OIDC authorization-code + PKCE only; it never collects o
 login password. GitHub Pages cannot set response headers, so `index.html` provides an
 early CSP meta policy as a baseline. A header CSP remains required when the static site moves behind
 a header-capable edge. Vite relaxes only `connect-src` for its development server so the disposable
-localhost MAS/Synapse fixture remains usable. Production and preproduction runtime settings are
-served from the public `runtime-settings.json` file; the compiled JS and CSS assets do not embed
-the backend origin. The settings file is validated before the UI renders: it must be a canonical
-HTTPS TeleCrypt backend URL. The OIDC issuer is derived from that backend origin. The same exact
-compiled JS, CSS, and other application assets can therefore be served in both environments. The
-public settings file is separate environment configuration and is expected to differ.
+localhost MAS/Synapse fixture remains usable. The page hostname is validated before the UI renders
+and derives the canonical HTTPS TeleCrypt backend URL (`storage.telecrypt.io` maps to
+`backend.telecrypt.io`; the future `storage.stage.telecrypt.io` maps to
+`backend.stage.telecrypt.io`). The OIDC issuer
+is derived from that backend origin. The same
+exact compiled JS, CSS, and other application assets can therefore be served in both environments.
+
+The browser session and Matrix device identifier are stored in tab-scoped `sessionStorage`, not
+`localStorage`; a reload in the same tab can resume, while another tab must authenticate separately.
+The device identifier is required when the shared refresh adapter is created, so refreshed OAuth scopes
+remain bound to the Matrix device that owns the session.
+If session storage is unavailable, the UI fails closed and does not open an account. The only
+browser-persistent UI value is the non-secret OIDC client registration identifier.
+
+GitHub Pages deployment runs only from the exact-tag workflow after it creates and verifies an
+exact published, non-prerelease immutable GitHub Release. Repository administrators must enforce
+both immutable releases and protection against moving or deleting the release tag before starting
+the workflow; the Actions token cannot inspect those administrative settings and the workflow's
+source checks cannot make tag publication atomic. The workflow builds and tests the site, creates
+or resumes one exact draft Release, verifies its metadata and bytes, publishes it, then verifies
+the public download and deploys those exact immutable Release bytes without rebuilding. A rerun may
+reproduce the local package for comparison, but it never replaces a published asset. Any source or
+metadata change fails closed and requires a new version.
+
+GitHub Pages release publication is separate from authenticated acceptance. Authenticated acceptance
+remains blocked until the site is served behind a header-capable edge that adds
+`Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`. The CSP meta tag
+cannot provide those response headers, and GitHub Pages cannot emit them.
 
 ## Shared UI vendor baseline
 
 `src/vendor/telecrypt-ui/product.css` is an exact local vendor copy of the
 canonical shared UI stylesheet. `src/theme.css` imports it directly, keeping
 this repository self-contained without a runtime package dependency. The
-vendor `PROVENANCE.json` records the exact `TeleCrypt-io/ui-shared-css` release and commit,
-Storage baseline, and content hash.
+vendor `PROVENANCE.json` records only the exact `TeleCrypt-io/ui-shared-css` source, release,
+commit, source path, and content hash.
 
 ## Development and checks
 
 ```
-npm ci
+npm ci --ignore-scripts --no-fund --no-audit
 npm run dev       # http://localhost:5173
 npm run lint
 npm test          # component/wiring tests; no browser Harness execution in CI
-npm exec -- tsc -b --noEmit
+npm run typecheck
+npm run verify:security
+npm run verify:archive
+npm run build
+npm run verify:package
 ```
 
 Browser acceptance tooling is operator-local Harness work, never a GitHub Actions job. Its real
@@ -47,12 +78,19 @@ browser suite expects the shared disposable Synapse/MAS fixture to be running on
 
 ## Releases and deployment
 
-Pushes and pull requests to `main` only verify the source. GitHub Pages deploys only when an
-annotated `storage-web-v*` release tag is pushed. The workflow checks the tag type and package
-version, and the repository ruleset forbids updating or deleting a release tag. Every correction
-therefore requires a new version. The Pages artifact contains the production runtime settings;
-preproduction must serve the same compiled assets with its own separately managed runtime settings
-file, without rebuilding those assets. Promotion records must compare the compiled asset hashes
-and record each environment's settings separately. The CSP permits HTTPS TeleCrypt subdomains for
-these shared assets; a header-capable preproduction and production edge should narrow that policy
-to each environment's exact backend origin when those hosts are selected.
+Pushes and pull requests to `main` only verify the source. A protected annotated
+`storage-web-v<major>.<minor>.<patch>` tag runs the exact-version release workflow; it checks the
+tag/source/main/package identity, installs dependencies, runs tests/lint/typecheck/build, and
+creates the single immutable Release archive. Pages deploys only after the published Release is
+rechecked and its archive bytes match the Release API digest. Every correction therefore requires a
+new version.
+The Pages artifact is environment-neutral; the browser derives its backend from the canonical site
+hostname. VM activation, promotion, and authenticated acceptance follow
+the operator-managed Harness deployment contract; this repository does not publish or duplicate
+those private operational steps. A header-capable edge must provide the
+concrete CSP and X-Frame-Options requirements described above.
+
+## License
+
+TeleCrypt-authored source in this repository is licensed under [BUSL-1.1](./LICENSE). Third-party
+dependencies retain their own licenses.

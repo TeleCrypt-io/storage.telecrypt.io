@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { registerE2eUser, waitForServerBackupCount } from "./testUsers";
-import { createVault, downloadFileBytes, loginViaUI, openVaultByName, uploadFile, confirmRecoveryKeySaved, restoreRecoveryKey } from "./uiHelpers";
+import { auditConsole, createVault, downloadFileBytes, loginViaUI, openVaultByName, uploadFile, confirmRecoveryKeySaved, restoreRecoveryKey } from "./uiHelpers";
 
 // Mirrors test/functional/keys.test.ts 5.3 ("a genuinely new device recovers
 // files via the Recovery Key") through the UI: set up recovery, capture the
@@ -16,6 +16,9 @@ test("recovery: set up on device A, restore and read a file on a fresh device B"
 
   const contextA = await browser.newContext();
   const pageA = await contextA.newPage();
+  const consoleA = auditConsole(pageA, [
+    /resetCrossSigning: Secret storage is not yet set up/,
+  ]);
 
   const original = Buffer.from("lost laptop recovery test content, via the UI\n".repeat(10));
 
@@ -35,9 +38,9 @@ test("recovery: set up on device A, restore and read a file on a fresh device B"
 
     // Server-side proof the backup engine actually finished uploading the
     // file's room key, not just that the engine believes it's active — read
-    // the access token straight out of this session's localStorage.
+    // the access token straight out of this tab's sessionStorage.
     const accessToken = await pageA.evaluate(() => {
-      const raw = localStorage.getItem("telecrypt-io-ui:session");
+      const raw = sessionStorage.getItem("telecrypt-io-ui:session");
       return raw ? (JSON.parse(raw) as { accessToken: string }).accessToken : null;
     });
     expect(accessToken).toBeTruthy();
@@ -48,6 +51,9 @@ test("recovery: set up on device A, restore and read a file on a fresh device B"
     // device_id/access_token, exactly the "new laptop" scenario.
     const contextB = await browser.newContext();
     const pageB = await contextB.newPage();
+    const consoleB = auditConsole(pageB, [
+      /Failed to decrypt a room event|Error decrypting event|key backup is not working|Can't find the room key/i,
+    ]);
     try {
       await loginViaUI(pageB, user);
       await openVaultByName(pageB, "RecoveryTest");
@@ -60,7 +66,7 @@ test("recovery: set up on device A, restore and read a file on a fresh device B"
       await pageB.locator('[data-testid="file-item"]', { hasText: "important.txt" })
         .getByTestId("download-file")
         .click();
-      await expect(pageB.getByTestId("folder-detail-error")).toBeVisible({ timeout: 10000 });
+      await expect(pageB.getByTestId("vault-detail-error")).toBeVisible({ timeout: 10000 });
 
       // Restore from the captured Recovery Key.
       await pageB.getByTestId("nav-recovery").click();
@@ -70,14 +76,16 @@ test("recovery: set up on device A, restore and read a file on a fresh device B"
 
       // Now the file must decrypt (poll — decryption settling after a
       // restore is real async work, not instant).
-      await pageB.getByTestId("nav-folders").click();
+      await pageB.getByTestId("nav-vaults").click();
       await openVaultByName(pageB, "RecoveryTest");
       const downloaded = await downloadFileBytes(pageB, "important.txt");
       expect(downloaded.equals(original)).toBe(true);
+      consoleB.assertClean();
     } finally {
       await pageB.close();
       await contextB.close();
     }
+    consoleA.assertClean();
   } finally {
     await pageA.close();
     await contextA.close();
