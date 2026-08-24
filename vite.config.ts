@@ -1,7 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const productionConnectSrc = "connect-src 'self' https://*.telecrypt.io;";
+const productionConnectSrc =
+  "connect-src 'self' https://backend.telecrypt.io https://backend.stage.telecrypt.io;";
 const developmentConnectSrc =
   "connect-src 'self' http://localhost:* ws://localhost:*;";
 

@@ -7,7 +7,7 @@ const expectedProduction = new Map([
   ["script-src", ["'self'", "'wasm-unsafe-eval'"]],
   ["style-src", ["'self'"]],
   ["img-src", ["'self'"]],
-  ["connect-src", ["'self'", "https://*.telecrypt.io"]],
+  ["connect-src", ["'self'", "https://backend.telecrypt.io", "https://backend.stage.telecrypt.io"]],
   ["form-action", ["'self'"]],
 ]);
 
@@ -41,7 +41,7 @@ requireExactPolicy(parsePolicy(matches[0][1]), expectedProduction);
 
 const viteConfig = readFileSync("vite.config.ts", "utf8");
 for (const exact of [
-  `const productionConnectSrc = "connect-src 'self' https://*.telecrypt.io;";`,
+  `"connect-src 'self' https://backend.telecrypt.io https://backend.stage.telecrypt.io;";`,
   `"connect-src 'self' http://localhost:* ws://localhost:*;";`,
 ]) {
   if (!viteConfig.includes(exact)) {
