@@ -200,6 +200,29 @@ describe("VaultContents mutation identity", () => {
     expect(screen.queryByTestId("vault-detail-error")).not.toBeInTheDocument();
   });
 
+  it("surfaces the SDK nonempty-folder refusal without invoking the delete callback", async () => {
+    vi.mocked(core.deleteFolder).mockRejectedValue(
+      Object.assign(new Error("cannot delete a nonempty vault or folder; delete its files first"), {
+        code: "NON_EMPTY_TREE",
+        treeId: "!child:localhost",
+      }),
+    );
+    vi.stubGlobal("confirm", () => true);
+    const onFolderDeleted = vi.fn<(folderId: string) => void>();
+    const user = userEvent.setup();
+    renderContents("!vault-a:localhost", onFolderDeleted);
+
+    await waitFor(() => expect(screen.getByTestId("delete-subfolder")).toBeInTheDocument());
+    await user.click(screen.getByTestId("delete-subfolder"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("vault-detail-error")).toHaveTextContent(
+        "Delete all files and empty child folders before deleting this vault or folder.",
+      ),
+    );
+    expect(onFolderDeleted).not.toHaveBeenCalled();
+  });
+
   it("does not trigger a download after the contents unmount", async () => {
     const download = deferred<{ bytes: Uint8Array; mimetype: string; name: string }>();
     vi.mocked(core.listFiles).mockResolvedValue([{ id: "$file:localhost", name: "file.txt" }]);

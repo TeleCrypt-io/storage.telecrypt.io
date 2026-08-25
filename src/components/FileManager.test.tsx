@@ -184,6 +184,33 @@ describe("FileManager refresh identity", () => {
     expect(core.deleteVault).not.toHaveBeenCalled();
   });
 
+  it("surfaces the SDK nonempty-vault refusal without refreshing or removing the vault", async () => {
+    const storage = fakeStorage("shared");
+    const vault = { id: "!vault:localhost", name: "Shared" };
+    vi.mocked(core.listVaults).mockResolvedValue([vault]);
+    vi.mocked(core.deleteVault).mockRejectedValue(
+      Object.assign(new Error("cannot delete a nonempty vault or folder; delete its files first"), {
+        code: "NON_EMPTY_TREE",
+        treeId: vault.id,
+      }),
+    );
+    useStorageMock.mockReturnValue({ storage } as never);
+    const user = userEvent.setup();
+    render(<FileManager />);
+    await waitFor(() => expect(screen.getByTestId("delete-vault")).toBeInTheDocument());
+
+    vi.stubGlobal("confirm", () => true);
+    await user.click(screen.getByTestId("delete-vault"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("vault-list-error")).toHaveTextContent(
+        "Delete all files and empty child folders before deleting this vault or folder.",
+      ),
+    );
+    expect(screen.getByText("Shared")).toBeInTheDocument();
+    expect(core.listVaults).toHaveBeenCalledTimes(1);
+  });
+
   it("does not apply a pending delete completion after ownership is revoked", async () => {
     const storage = fakeStorage("shared");
     const deletion = deferred<{ id: string; deleted: true }>();
