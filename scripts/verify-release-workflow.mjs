@@ -59,6 +59,25 @@ function publicationAction(probe, attempt, tag = "storage-web-v1.2.3") {
   throw new Error("unknown state");
 }
 
+function discoverRelease(pages, tag = "storage-web-v1.2.3", maxPages = 100) {
+  if (!Array.isArray(pages) || pages.length === 0) throw new Error("incomplete Release list");
+  const matches = [];
+  for (let index = 0; index < pages.length; index += 1) {
+    const page = pages[index];
+    if (!Array.isArray(page) || page.length > 100) throw new Error("invalid Release list page");
+    for (const release of page) if (release?.tag_name === tag) matches.push(release);
+    if (page.length < 100) {
+      if (matches.length > 1) throw new Error("duplicate Release records");
+      if (matches.length === 0) return "absent";
+      if (matches[0].draft === true) return "draft";
+      if (matches[0].draft === false) return "published";
+      throw new Error("unknown Release state");
+    }
+    if (index + 1 >= maxPages) throw new Error("incomplete Release list");
+  }
+  throw new Error("incomplete Release list");
+}
+
 function finalPublishRecheck(probe, tag = "storage-web-v1.2.3") {
   if (publicationAction(probe, 1, tag) !== "reuse-draft") throw new Error("final state is not a draft");
   const expectedName = `storage-web-${tag.slice("storage-web-v".length)}.pages.zip`;
@@ -66,7 +85,25 @@ function finalPublishRecheck(probe, tag = "storage-web-v1.2.3") {
 }
 
 const tag = "storage-web-v1.2.3";
-if (publicationAction(null, 1, tag) !== "create-draft") throw new Error("404 did not create a draft");
+if (publicationAction(null, 1, tag) !== "create-draft") throw new Error("absence did not create a draft");
+if (discoverRelease([[]], tag) !== "absent") throw new Error("empty complete Release list was not absent");
+const olderReleases = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, tag_name: "storage-web-v0.0.0", draft: false }));
+if (discoverRelease([olderReleases, [{ id: 101, tag_name: tag, draft: true }]], tag) !== "draft") throw new Error("older draft was not discovered");
+let rejected = false;
+try {
+  discoverRelease([[{ id: 1, tag_name: tag, draft: true }, { id: 2, tag_name: tag, draft: false }]], tag);
+} catch {
+  rejected = true;
+}
+if (!rejected) throw new Error("duplicate Release records were accepted");
+if (discoverRelease([[{ id: 1, tag_name: tag, draft: false }]], tag) !== "published") throw new Error("published Release was not discovered");
+rejected = false;
+try {
+  discoverRelease(Array.from({ length: 100 }, () => olderReleases), tag);
+} catch {
+  rejected = true;
+}
+if (!rejected) throw new Error("unbounded Release list was accepted");
 if (publicationAction({ id: 42, tag_name: tag, name: tag, body: `Release ${tag}`, target_commitish: "a".repeat(40), created_at: "2026-08-24T00:00:00Z", published_at: null, draft: true, prerelease: false, assets: [] }, 1, tag) !== "reuse-draft") throw new Error("draft was not reusable");
 if (publicationAction(exactPublished(tag), 2, tag) !== "reuse-published") throw new Error("exact rerun was not reusable");
 const exactDraft = { id: 42, tag_name: tag, name: tag, body: `Release ${tag}`, target_commitish: "a".repeat(40), created_at: "2026-08-24T00:00:00Z", published_at: null, draft: true, prerelease: false, immutable: false, assets: [{ id: 43, name: "storage-web-1.2.3.pages.zip", state: "uploaded", size: 10, digest: `sha256:${"a".repeat(64)}` }] };
@@ -111,7 +148,7 @@ for (const fragment of [
   "git cat-file -t refs/remotes/origin/release-tag", "git merge-base --is-ancestor",
   "https://github.com/${GITHUB_REPOSITORY}.git", "--no-includes", "--name-only", "protocol.file.allow=never",
   "protocol.ext.allow=never", "protocol.ssh.allow=never", "credential.helper=", "core.askPass=/bin/false",
-  "http.proxy=", "https.proxy=", "scripts/bounded-command.py", "--include", "status_line", "--method POST",
+  "http.proxy=", "https.proxy=", "scripts/bounded-command.py", "--method POST",
   "--field draft=true", "target_commitish=$RELEASE_SHA", "--method DELETE", "--input \"$archive\"", "Accept: application/octet-stream",
   "cmp -s \"$archive\"", "--method PATCH", "--field draft=false", "GITHUB_RUN_ATTEMPT",
 ]) if (!releaseShell.includes(fragment)) throw new Error(`release state machine is missing ${fragment}`);
@@ -123,7 +160,9 @@ for (const fragment of ["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_
   if (!workflow.includes(fragment)) throw new Error(`transport hardening is missing ${fragment}`);
 }
 if (releaseShell.indexOf("--method POST") > releaseShell.indexOf("--method DELETE") || releaseShell.indexOf("--method DELETE") > releaseShell.indexOf("--input \"$archive\"") || releaseShell.indexOf("--input \"$archive\"") > releaseShell.indexOf("--method PATCH")) throw new Error("draft lifecycle operations are out of order");
-if (workflow.includes("gh release create") || workflow.includes("release create") || workflow.includes("--draft") || workflow.includes("releases?per_page=")) throw new Error("one-shot or broad Release recovery remains");
+if (workflow.includes("gh release create") || workflow.includes("release create") || workflow.includes("--draft")) throw new Error("one-shot Release recovery remains");
+for (const fragment of ["releases?per_page=100&page=$page", "--jq '[.[] | {id,tag_name,draft}]'", "page_size", "test \"$page_size\" -le 100", "max_release_pages=100", "release-matches.jsonl", "match_count", "Release list completeness cannot be proven", "discovery_state", "jq -s -er"]) if (!releaseShell.includes(fragment)) throw new Error(`bounded Release discovery is missing ${fragment}`);
+if (releaseShell.includes("/releases/tags/$RELEASE_TAG")) throw new Error("draft-blind tag endpoint remains the discovery authority");
 if (!releaseShell.includes("(.assets|length) <= 64") || !releaseShell.includes("created_at") || !releaseShell.includes("published_at")) throw new Error("draft cardinality/timestamp bounds are missing");
 if (!workflow.includes("concurrency:\n  group: pages-storage-web-")) throw new Error("Pages concurrency is missing");
 if (!release.includes("needs: build") && !workflow.includes("release:\n    needs: build")) throw new Error("Release does not depend on the tested build");

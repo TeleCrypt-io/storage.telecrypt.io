@@ -286,32 +286,52 @@ jobs:
            cmp -s "$archive" "$output"
             bounded_local "$output.validation" 300 python3 scripts/validate-pages-archive.py "$output"
           }
+          # The tag endpoint hides drafts and a failed gh request can still leave
+          # its JSON error body in stdout. Discover through every bounded Release
+          # list page first, so create is reached only after absence is proven.
           probe="$RUNNER_TEMP/release-probe.json"
-          set +e
-          bounded_gh "$probe" api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' "/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
-          probe_status="$?"
-          set -e
-          if test "$probe_status" != 0; then
-            test ! -s "$probe"
-            test -s "$probe.err"
-            test "$(wc -c <"$probe.err")" -le 131072
-            status_probe="$RUNNER_TEMP/release-status"
-            set +e
-            bounded_gh "$status_probe" api --include --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' "/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
-            status_probe_exit="$?"
-            set -e
-            test "$status_probe_exit" != 0
-            status_line="$(awk '/^HTTP\/[0-9.]+[[:space:]]/{print; exit}' "$status_probe")"
-            [[ "$status_line" =~ ^HTTP/[0-9.]+[[:space:]]+404([[:space:]]|$) ]]
+          release_matches="$RUNNER_TEMP/release-matches.jsonl"
+          : >"$release_matches"
+          max_release_pages=100
+          page=1
+          while :; do
+            page_json="$RUNNER_TEMP/release-page-$page.json"
+            bounded_gh "$page_json" api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' --jq '[.[] | {id,tag_name,draft}]' "/repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$page"
+            jq -e 'type == "array"' "$page_json" >/dev/null
+            jq -c --arg tag "$RELEASE_TAG" '.[] | select(.tag_name==$tag) | {id,tag_name,draft}' "$page_json" >>"$release_matches"
+            page_size="$(jq -er 'length' "$page_json")"
+            test "$page_size" -le 100
+            if test "$page_size" -lt 100; then
+              break
+            fi
+            if test "$page" -ge "$max_release_pages"; then
+              echo "Release list completeness cannot be proven within the bounded page limit" >&2
+              exit 1
+            fi
+            page=$((page + 1))
+          done
+          match_count="$(jq -s -er 'length' "$release_matches")"
+          test "$match_count" -le 1
+          if test "$match_count" = 0; then
+            discovery_state="absent"
             create="$RUNNER_TEMP/release-create.json"
             verify_source
             bounded_gh "$create" api --hostname github.com --method POST --header 'X-GitHub-Api-Version: 2026-03-10' --raw-field "tag_name=$RELEASE_TAG" --raw-field "name=$RELEASE_TAG" --raw-field "body=Release $RELEASE_TAG" --raw-field "target_commitish=$RELEASE_SHA" --field draft=true --field prerelease=false "/repos/$GITHUB_REPOSITORY/releases"
             release_id="$(jq -er '.id | select(type=="number" and .>0 and floor==.)' "$create")"
-            bounded_gh "$probe" api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' "/repos/$GITHUB_REPOSITORY/releases/$release_id"
           else
-            release_id="$(jq -er '.id | select(type=="number" and .>0 and floor==.)' "$probe")"
+            release_id="$(jq -s -er '.[0].id | select(type=="number" and .>0 and floor==.)' "$release_matches")"
+            discovery_state="$(jq -s -er 'if .[0].draft==true then "draft" elif .[0].draft==false then "published" else empty end' "$release_matches")"
           fi
+          bounded_gh "$probe" api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' "/repos/$GITHUB_REPOSITORY/releases/$release_id"
           state="$(jq -er 'if .draft==true then "draft" elif .draft==false then "published" else empty end' "$probe")"
+          if test "$discovery_state" = "absent" && test "$state" != "draft"; then
+            echo "Release creation did not return a draft" >&2
+            exit 1
+          fi
+          if test "$discovery_state" != "absent" && test "$discovery_state" != "$state"; then
+            echo "Release discovery state changed before the authoritative fetch" >&2
+            exit 1
+          fi
           case "$state" in
             draft)
               verify_draft "$probe" "$release_id"
