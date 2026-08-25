@@ -6,13 +6,11 @@
  * adds only the two UI-specific recovery/ownership helpers without copying
  * SDK implementation into the UI.
  */
-import { getMyVaultRole } from "@telecrypt-io/storage/core";
-import type { TeleCryptIOStorage as Storage } from "@telecrypt-io/storage";
+import { getMyVaultRole, type TeleCryptIOStorage } from "@telecrypt-io/storage";
 
-export * from "@telecrypt-io/storage/core";
-export { TeleCryptIOStorage } from "@telecrypt-io/storage";
+export * from "@telecrypt-io/storage";
 
-export function isVaultOwner(storage: Storage | null, vaultId: string): boolean {
+export function isVaultOwner(storage: TeleCryptIOStorage | null, vaultId: string): boolean {
   try {
     return Boolean(storage && getMyVaultRole(storage, vaultId) === "owner");
   } catch {
@@ -20,6 +18,6 @@ export function isVaultOwner(storage: Storage | null, vaultId: string): boolean 
   }
 }
 
-export function isRecoverySetup(storage: Storage, signal?: AbortSignal): Promise<boolean> {
+export function isRecoverySetup(storage: TeleCryptIOStorage, signal?: AbortSignal): Promise<boolean> {
   return storage.keys.isRecoverySetup(signal);
 }
