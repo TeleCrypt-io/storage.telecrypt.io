@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const workflow = readFileSync(".github/workflows/release-ui.yml", "utf8");
 const verify = readFileSync(".github/workflows/verify.yml", "utf8");
 const sharedUiRelease = readFileSync("scripts/verify-shared-ui-release.sh", "utf8");
+const archiveTests = readFileSync("scripts/test-validate-pages-archive.py", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 if (readFileSync(".node-version", "utf8").trim() !== "22.23.2" || packageJson.packageManager !== "npm@10.9.8" || packageJson.engines?.node !== ">=22.23.2") throw new Error("Node/npm toolchain policy is not encoded exactly");
 
@@ -134,6 +135,7 @@ for (const line of workflow.split("\n").filter((line) => line.includes("gh api")
 if (!packageShell.includes("bounded_package") || !packageShell.includes("package-pages.sh") || !packageShell.includes("validate-pages-archive.py")) throw new Error("Pages packaging commands are not bounded");
 if (!deployVerifyShell.includes("bounded_local") || !deployVerifyShell.includes("unzip -q") || !deployVerifyShell.includes("validate-pages-archive.py")) throw new Error("Pages artifact extraction commands are not bounded");
 if (!verify.includes("npm run verify:archive") || !verify.includes("npm run verify:package")) throw new Error("verification contract is incomplete");
+if (!archiveTests.includes("unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout))")) throw new Error("archive test success report must use stdout");
 if (!releaseShell.includes("revalidate_draft_for_publish")) throw new Error("the draft is not re-fetched immediately before publication");
 if (!releaseShell.includes('verify_source\n              revalidate_draft_for_publish "$probe" "$release_id"\n              bounded_gh "$RUNNER_TEMP/published.json"')) throw new Error("publication does not perform the final source and Release recheck immediately before PATCH");
 console.log("storage Release behavioral invariants passed");

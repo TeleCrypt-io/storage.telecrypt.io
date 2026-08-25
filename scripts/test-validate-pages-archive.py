@@ -92,4 +92,4 @@ class ArchiveValidatorTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout))
