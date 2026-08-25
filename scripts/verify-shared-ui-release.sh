@@ -4,8 +4,8 @@ set -euo pipefail
 # Storage vendors the stylesheet, so this is a release-time provenance gate,
 # not a runtime download. Keep the selected release exact until the shared UI
 # source publishes a successor and this checkout updates its provenance.
-ui_tag="v0.1.1"
-ui_asset="telecrypt-io-ui-0.1.1.tgz"
+ui_tag="v0.1.8"
+ui_asset="telecrypt-io-ui-0.1.8.tgz"
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf -- "$temporary_dir"' EXIT
 

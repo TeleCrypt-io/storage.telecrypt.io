@@ -6,10 +6,10 @@ const provenancePath = "src/vendor/telecrypt-ui/PROVENANCE.json";
 const stylesheetPath = "src/vendor/telecrypt-ui/product.css";
 export const EXPECTED_PROVENANCE = {
   vendor: "@telecrypt-io/ui",
-  version: "0.1.1",
+  version: "0.1.8",
   canonical_source: "https://github.com/TeleCrypt-io/ui-shared-css",
-  canonical_release: "v0.1.1",
-  canonical_commit: "0034946dde095d3a1df80b2bdd9a6e6b317dcf09",
+  canonical_release: "v0.1.8",
+  canonical_commit: "257c9ec70024b5d39b76c266c3ab5d129fc34c65",
   source_file: "src/product.css",
   sha256: "ce9c3c0ff968d3156521e79f9f81a800441f730c2875adf37a7d28c57cab5f6a",
 };
