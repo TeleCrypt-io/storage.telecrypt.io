@@ -232,7 +232,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
             // Crypto and the Matrix SDK are intentionally fetched only when a
             // session is being opened, not on the public sign-in screen.
             const core = await import("../lib/core");
-            const homeserver = getRuntimeSettings().homeserver;
+            const { homeserver, serverName } = getRuntimeSettings();
             const authMetadata = await core.discoverOidcIssuer(homeserver, abortController.signal);
             if (
               typeof authMetadata.issuer !== "string" ||
@@ -314,8 +314,12 @@ export function StorageProvider({ children }: { children: ReactNode }) {
               return tokenRefreshFunction(refreshToken, refreshSignal);
             };
             log("Building encrypted client (OIDC session)…");
-            client = await core.TeleCryptIOStorage.createFromOidc({
+            const createFromOidc = core.TeleCryptIOStorage.createFromOidc as unknown as (
+              options: Parameters<typeof core.TeleCryptIOStorage.createFromOidc>[0] & { serverName: string },
+            ) => Promise<TeleCryptIOStorage>;
+            client = await createFromOidc({
               baseUrl: homeserver,
+              serverName,
               userId: s.userId,
               accessToken: s.accessToken,
               deviceId: s.deviceId,

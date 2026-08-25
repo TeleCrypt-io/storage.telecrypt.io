@@ -356,7 +356,7 @@ export async function completeOidcLoginFromCallback(signal?: AbortSignal): Promi
   try {
     throwIfAborted(signal);
     if (!sessionCleared) throw new Error(SESSION_PERSISTENCE_ERROR);
-    const { homeserver } = getRuntimeSettings();
+    const { homeserver, serverName } = getRuntimeSettings();
     const oidcIssuer = runtimeOidcIssuer();
     if (homeserverUrl !== homeserver) {
       throw new Error("OIDC callback homeserver does not match the configured environment");
@@ -379,7 +379,7 @@ export async function completeOidcLoginFromCallback(signal?: AbortSignal): Promi
       throw new Error("completeOidcLoginFromCallback: granted scope did not include a device_id");
     }
 
-    const who = await whoAmI(homeserverUrl, accessToken, signal);
+    const who = await whoAmI(homeserverUrl, accessToken, serverName, signal);
     if (who.deviceId !== deviceId) {
       throw new Error("OIDC device identity could not be verified");
     }

@@ -259,6 +259,7 @@ describe("login", () => {
     expect(core.TeleCryptIOStorage.createFromOidc).toHaveBeenCalledWith(
       expect.objectContaining({
         baseUrl: SESSION.homeserver,
+        serverName: "localhost",
         userId: SESSION.userId,
         deviceId: SESSION.deviceId,
         accessToken: SESSION.accessToken,

@@ -88,6 +88,7 @@ export const completeAuthorizationCodeFlow = sdkCore.completeAuthorizationCodeFl
 export const whoAmI = sdkCore.whoAmI as unknown as (
   homeserver: string,
   accessToken: string,
+  serverName: string,
   signal?: AbortSignal,
 ) => Promise<Awaited<ReturnType<typeof sdkCore.whoAmI>>>;
 

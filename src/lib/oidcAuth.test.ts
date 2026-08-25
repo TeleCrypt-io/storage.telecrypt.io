@@ -311,6 +311,12 @@ describe("beginOidcLogin stable device id", () => {
       userId: "@alice:localhost",
       deviceId: "DEVICE1234",
     });
+    expect(core.whoAmI).toHaveBeenCalledWith(
+      "http://localhost:8008",
+      "access",
+      "localhost",
+      expect.anything(),
+    );
     expect(window.history.replaceState).toHaveBeenCalledWith({}, "", "/");
   });
 
