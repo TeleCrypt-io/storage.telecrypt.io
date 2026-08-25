@@ -1,11 +1,9 @@
 # storage.telecrypt.io
 
 The static React/Vite site served at [storage.telecrypt.io](https://storage.telecrypt.io).
-It is prepared for the exact required `@telecrypt-io/storage@0.5.0` browser library; that release
-and its npm lock integrity must be published and recorded before a site release can proceed.
-Until then, the missing lock integrity is an explicit release-order blocker, not a value to guess.
-The release and verification workflows fail before dependency installation while that gate remains
-unmet.
+It consumes the exact published `@telecrypt-io/storage@0.5.10` browser library. The package lock
+binds that dependency to the published tarball's integrity and the release workflows verify the
+immutable SDK release record and package bytes before dependency installation.
 Storage protocol, cryptography, and the command-line client deliberately live in their own
 repositories.
 

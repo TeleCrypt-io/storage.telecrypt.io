@@ -4,9 +4,9 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const STORAGE_SDK_PACKAGE = "@telecrypt-io/storage";
-export const STORAGE_SDK_VERSION = "0.5.0";
+export const STORAGE_SDK_VERSION = "0.5.10";
 export const STORAGE_SDK_RESOLVED =
-  "https://registry.npmjs.org/@telecrypt-io/storage/-/storage-0.5.0.tgz";
+  "https://registry.npmjs.org/@telecrypt-io/storage/-/storage-0.5.10.tgz";
 
 const STORAGE_SDK_LOCK_PATH = `node_modules/${STORAGE_SDK_PACKAGE}`;
 const SHA512_SRI = /^sha512-[A-Za-z0-9+/]{86}==$/u;
@@ -47,7 +47,7 @@ export function validateStorageSdkReleaseRecord(record) {
     record.tarball_size < 1 ||
     record.tarball_size > MAX_RELEASE_BYTES
   ) {
-    fail("the SDK release record is not an exact v0.5.0 immutable package record");
+    fail(`the SDK release record is not an exact v${STORAGE_SDK_VERSION} immutable package record`);
   }
   return record;
 }

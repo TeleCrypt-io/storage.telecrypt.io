@@ -315,7 +315,7 @@ describe("beginOidcLogin stable device id", () => {
       "http://localhost:8008",
       "access",
       "localhost",
-      expect.anything(),
+      undefined,
     );
     expect(window.history.replaceState).toHaveBeenCalledWith({}, "", "/");
   });

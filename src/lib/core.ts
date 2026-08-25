@@ -1,10 +1,9 @@
 /**
  * Browser-facing SDK boundary.
  *
- * The repository is intentionally pinned to storage SDK 0.5.0. The locally
- * installed dependency may remain 0.4.0 until that exact release is published,
- * so these small adapters describe the 0.5 cancellation surface without
- * inventing package-lock integrity or copying SDK implementation into the UI.
+ * The repository is intentionally pinned to the exact published storage SDK
+ * 0.5.10. These small adapters keep the browser boundary on the SDK's
+ * cancellation surface without copying SDK implementation into the UI.
  */
 import * as sdkCore from "@telecrypt-io/storage/core";
 import type { TeleCryptIOStorage as Storage } from "@telecrypt-io/storage";
@@ -91,33 +90,3 @@ export const whoAmI = sdkCore.whoAmI as unknown as (
   serverName: string,
   signal?: AbortSignal,
 ) => Promise<Awaited<ReturnType<typeof sdkCore.whoAmI>>>;
-
-// Keep the browser boundary typed against the issuer- and device-bound refresh
-// contract while the checked-in node_modules may still expose the older SDK
-// signature. This adapter is temporary until the exact declared SDK release is
-// present; it does not duplicate the implementation.
-export const buildTokenRefreshFunction = sdkCore.buildTokenRefreshFunction as unknown as (
-  metadata: {
-    issuer: string;
-    token_endpoint: string;
-    revocation_endpoint?: string;
-  },
-  clientId: string,
-  onPersist: (
-    tokens: { accessToken: string; refreshToken?: string },
-    signal?: AbortSignal,
-  ) => Promise<void>,
-  expectedDeviceId: string,
-) => (refreshToken: string, signal?: AbortSignal) => Promise<{
-  accessToken: string;
-  refreshToken?: string;
-  expiry?: Date;
-}>;
-
-// Reflective lookup keeps the browser bundle from treating the export as a
-// statically missing symbol while the local checkout is waiting for SDK 0.5.0.
-const sdkFileLimit = Reflect.get(sdkCore, "MAX_MEDIA_FILE_BYTES");
-if (typeof sdkFileLimit !== "number" || !Number.isSafeInteger(sdkFileLimit) || sdkFileLimit <= 0) {
-  throw new Error("The installed storage SDK does not export its authoritative file limit");
-}
-export const MAX_MEDIA_FILE_BYTES = sdkFileLimit;
