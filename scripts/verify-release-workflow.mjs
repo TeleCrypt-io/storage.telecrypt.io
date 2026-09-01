@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 // Offline behavioral checks for the Pages Release state machine.  The fixtures
@@ -143,6 +144,62 @@ const build = job("build");
 const releaseShell = step(release, "Create or reuse the exact draft Release");
 const packageShell = step(build, "Package the deterministic Pages artifact");
 const deployVerifyShell = step(deploy, "Download and verify the immutable Release artifact");
+const assetRecheckLine = releaseShell.split("\n").find((line) =>
+  line.includes('--arg name "storage-web-${RELEASE_TAG#storage-web-v}.pages.zip"') &&
+  line.includes('((.assets|type)=="array" and (.assets|length)==1)'),
+);
+if (!assetRecheckLine) throw new Error("draft asset recheck predicate is missing");
+const assetRecheckMatch = assetRecheckLine.match(/'([^']+)' "\$json" >\/dev\/null$/u);
+if (!assetRecheckMatch) throw new Error("draft asset recheck predicate cannot be extracted");
+const assetRecheckPredicate = assetRecheckMatch[1];
+const expectedAssetRecheckPredicate = '((.assets|type)=="array" and (.assets|length)==1) and (.assets[0]|type=="object" and (.id|type=="number" and .>0 and floor==.) and .name==$name and .state=="uploaded" and .size==$size and .digest==$digest)';
+const brokenAssetRecheckPredicate = expectedAssetRecheckPredicate.replace(".>0", ".id>0");
+if (assetRecheckPredicate === brokenAssetRecheckPredicate || releaseShell.includes(brokenAssetRecheckPredicate)) {
+  throw new Error("draft asset recheck still uses the broken jq input context");
+}
+if (assetRecheckPredicate !== expectedAssetRecheckPredicate) {
+  throw new Error("draft asset recheck predicate differs from the exact contract");
+}
+function evaluateAssetPredicate(predicate, document) {
+  const result = spawnSync(
+    "jq",
+    [
+      "-e",
+      "--arg",
+      "name",
+      "storage-web-1.2.3.pages.zip",
+      "--arg",
+      "digest",
+      `sha256:${"a".repeat(64)}`,
+      "--argjson",
+      "size",
+      "10",
+      predicate,
+    ],
+    { input: `${JSON.stringify(document)}\n`, encoding: "utf8" },
+  );
+  if (result.error) throw new Error(`jq predicate regression check could not run: ${result.error.message}`);
+  return result.status === 0;
+}
+const validAssetDocument = {
+  assets: [{ id: 43, name: "storage-web-1.2.3.pages.zip", state: "uploaded", size: 10, digest: `sha256:${"a".repeat(64)}` }],
+};
+if (!evaluateAssetPredicate(assetRecheckPredicate, validAssetDocument)) {
+  throw new Error("corrected draft asset recheck rejected a valid asset");
+}
+if (evaluateAssetPredicate(brokenAssetRecheckPredicate, validAssetDocument)) {
+  throw new Error("the old broken draft asset recheck accepted a valid asset");
+}
+for (const asset of [
+  { ...validAssetDocument.assets[0], id: 0 },
+  { ...validAssetDocument.assets[0], id: 43.5 },
+  { ...validAssetDocument.assets[0], id: "43" },
+  { ...validAssetDocument.assets[0], id: undefined },
+]) {
+  if (evaluateAssetPredicate(assetRecheckPredicate, { assets: [asset] })) {
+    throw new Error("corrected draft asset recheck accepted an invalid asset id");
+  }
+}
 for (const fragment of [
   "refs/tags/$RELEASE_TAG:refs/remotes/origin/release-tag", "refs/heads/main:refs/remotes/origin/main",
   "git cat-file -t refs/remotes/origin/release-tag", "git merge-base --is-ancestor",
