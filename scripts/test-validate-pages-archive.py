@@ -44,7 +44,12 @@ class ArchiveValidatorTest(unittest.TestCase):
 
     @staticmethod
     def baseline() -> list[tuple[zipfile.ZipInfo, bytes]]:
-        return [member("index.html", b"ok"), member("CNAME", b"storage.telecrypt.io\n")]
+        headers = (ROOT / "public" / "_headers").read_bytes()
+        return [
+            member("index.html", b"ok"),
+            member("CNAME", b"storage.telecrypt.io\n"),
+            member("_headers", headers),
+        ]
 
     def test_accepts_a_small_canonical_archive(self) -> None:
         self.assertEqual(self.run_validator(self.baseline()).returncode, 0)
@@ -87,7 +92,17 @@ class ArchiveValidatorTest(unittest.TestCase):
         self.assertNotEqual(self.run_validator(entries).returncode, 0)
 
     def test_rejects_wrong_cname(self) -> None:
-        entries = [member("index.html", b"ok"), member("CNAME", b"attacker.example\n")]
+        entries = self.baseline()
+        entries[1] = member("CNAME", b"attacker.example\n")
+        self.assertNotEqual(self.run_validator(entries).returncode, 0)
+
+    def test_rejects_missing_headers(self) -> None:
+        entries = [entry for entry in self.baseline() if entry[0].filename != "_headers"]
+        self.assertNotEqual(self.run_validator(entries).returncode, 0)
+
+    def test_rejects_wrong_headers(self) -> None:
+        entries = self.baseline()
+        entries[2] = member("_headers", b"/*\n  X-Frame-Options: DENY\n")
         self.assertNotEqual(self.run_validator(entries).returncode, 0)
 
 
