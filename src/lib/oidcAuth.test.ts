@@ -217,7 +217,7 @@ describe("beginOidcLogin stable device id", () => {
   it("rejects a callback for a different issuer", async () => {
     callback("?code=one&state=two");
     vi.mocked(core.completeAuthorizationCodeFlow).mockResolvedValue({
-      homeserverUrl: getRuntimeSettings().homeserver,
+      homeserverUrl: `${getRuntimeSettings().homeserver}/`,
       oidcClientSettings: { issuer: "https://unexpected.example.test/", clientId: "client-123" },
       tokenResponse: { access_token: "access", refresh_token: "refresh", scope: "scope" },
     } as never);
@@ -227,6 +227,10 @@ describe("beginOidcLogin stable device id", () => {
     );
     expect(window.history.replaceState).toHaveBeenCalledWith({}, "", "/");
     expect(core.whoAmI).not.toHaveBeenCalled();
+    expect(revocation.revokeMatrixSession).toHaveBeenCalledWith({
+      homeserver: getRuntimeSettings().homeserver,
+      accessToken: "access",
+    }, undefined, undefined);
   });
 
   it("rejects a callback for a different registered client", async () => {
@@ -297,7 +301,7 @@ describe("beginOidcLogin stable device id", () => {
   it("scrubs a successful callback before returning the validated session", async () => {
     callback("?code=one&state=two");
     vi.mocked(core.completeAuthorizationCodeFlow).mockResolvedValue({
-      homeserverUrl: getRuntimeSettings().homeserver,
+      homeserverUrl: `${getRuntimeSettings().homeserver}/`,
       oidcClientSettings: { issuer: METADATA.issuer, clientId: "client-123" },
       tokenResponse: {
         access_token: "access",
@@ -308,6 +312,7 @@ describe("beginOidcLogin stable device id", () => {
     vi.mocked(core.whoAmI).mockResolvedValue({ userId: "@alice:localhost", deviceId: "DEVICE1234" });
 
     await expect(completeOidcLoginFromCallback()).resolves.toMatchObject({
+      homeserver: getRuntimeSettings().homeserver,
       userId: "@alice:localhost",
       deviceId: "DEVICE1234",
     });

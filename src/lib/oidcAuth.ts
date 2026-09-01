@@ -90,6 +90,14 @@ function redirectUri(): string {
   return window.location.origin + "/";
 }
 
+function isRuntimeHomeserver(candidate: string, runtime: string): boolean {
+  try {
+    return new URL(candidate).href === new URL(runtime).href;
+  } catch {
+    return false;
+  }
+}
+
 function persistentStore(): Storage {
   try {
     const store = window.localStorage;
@@ -352,13 +360,14 @@ export async function completeOidcLoginFromCallback(signal?: AbortSignal): Promi
   }
   const sessionCleared = clearSession();
   const { tokenResponse, oidcClientSettings, homeserverUrl } = completed;
+  const { homeserver, serverName } = getRuntimeSettings();
+  const homeserverIsRuntime = isRuntimeHomeserver(homeserverUrl, homeserver);
 
   try {
     throwIfAborted(signal);
     if (!sessionCleared) throw new Error(SESSION_PERSISTENCE_ERROR);
-    const { homeserver, serverName } = getRuntimeSettings();
     const oidcIssuer = runtimeOidcIssuer();
-    if (homeserverUrl !== homeserver) {
+    if (!homeserverIsRuntime) {
       throw new Error("OIDC callback homeserver does not match the configured environment");
     }
     if (oidcClientSettings.issuer !== oidcIssuer) {
@@ -379,7 +388,7 @@ export async function completeOidcLoginFromCallback(signal?: AbortSignal): Promi
       throw new Error("completeOidcLoginFromCallback: granted scope did not include a device_id");
     }
 
-    const who = await whoAmI(homeserverUrl, accessToken, serverName, signal);
+    const who = await whoAmI(homeserver, accessToken, serverName, signal);
     if (who.deviceId !== deviceId) {
       throw new Error("OIDC device identity could not be verified");
     }
@@ -391,7 +400,7 @@ export async function completeOidcLoginFromCallback(signal?: AbortSignal): Promi
 
     if (loadPendingRevocations().length !== 0) throw new Error(SESSION_CLEANUP_PENDING_ERROR);
     return {
-      homeserver: homeserverUrl,
+      homeserver,
       userId: who.userId,
       deviceId,
       accessToken,
@@ -410,9 +419,8 @@ export async function completeOidcLoginFromCallback(signal?: AbortSignal): Promi
     }
     let cleanupConfirmed = false;
     try {
-      const { homeserver } = getRuntimeSettings();
-      if (homeserverUrl === homeserver && accessToken) {
-        const target = { homeserver: homeserverUrl, accessToken };
+      if (homeserverIsRuntime && accessToken) {
+        const target = { homeserver, accessToken };
         await revokeMatrixSession(target, undefined, signal);
         cleanupConfirmed = clearPendingRevocation(target);
       }
@@ -421,11 +429,11 @@ export async function completeOidcLoginFromCallback(signal?: AbortSignal): Promi
       // cannot be recorded for a same-tab revocation retry.
     }
     const canRetryCleanup =
-      homeserverUrl === getRuntimeSettings().homeserver &&
+      homeserverIsRuntime &&
       accessToken !== null;
     if (!cleanupConfirmed && canRetryCleanup && accessToken !== null) {
       cleanupConfirmed = savePendingRevocation({
-        homeserver: homeserverUrl,
+        homeserver,
         accessToken,
       });
     }
