@@ -41,10 +41,10 @@ jobs:
       - name: Verify immutable Release workflow invariants
         run: node scripts/verify-release-workflow.mjs
 
-      - name: Setup Node 22.23.2
+      - name: Setup Node 24.20.0
         uses: actions/setup-node@v7.0.0
         with:
-          node-version: "22.23.2"
+          node-version: "24.20.0"
           cache: "npm"
 
       - name: Require exact immutable shared UI release
@@ -90,8 +90,8 @@ jobs:
             test ! -s "$error"
             ! grep -Eqi '(^|[^[:alnum:]_])warn(ing)?([^[:alnum:]_]|$)' "$output" "$error"
           }
-          test "$(node --version)" = "v22.23.2"
-          test "$(npm --version)" = "10.9.8"
+          test "$(node --version)" = "v24.20.0"
+          test "$(npm --version)" = "11.19.0"
           bounded_command "$RUNNER_TEMP/storage-npm-ci.out" 600 npm ci --ignore-scripts --no-fund --no-audit --loglevel=error
 
       - name: Verify license and vendored UI provenance
