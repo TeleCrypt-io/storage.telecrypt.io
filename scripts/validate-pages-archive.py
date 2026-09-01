@@ -23,6 +23,7 @@ MAX_MEMBER_COUNT = LIMITS["max_member_count"]
 MAX_MEMBER_PATH_BYTES = LIMITS["max_member_path_bytes"]
 MAX_MEMBER_UNCOMPRESSED_BYTES = LIMITS["max_member_uncompressed_bytes"]
 MAX_TOTAL_UNCOMPRESSED_BYTES = LIMITS["max_total_uncompressed_bytes"]
+EXPECTED_HEADERS = (Path(__file__).parent.parent / "public" / "_headers").read_bytes()
 
 
 def fail(message: str) -> None:
@@ -73,8 +74,11 @@ with zipfile.ZipFile(archive_path) as archive:
         for index in range(1, len(parts)):
             if "/".join(parts[:index]) in name_set:
                 fail("archive contains a file/path conflict")
-    if name_set != {"index.html", "CNAME"} and not {"index.html", "CNAME"}.issubset(name_set):
+    required_names = {"index.html", "CNAME", "_headers"}
+    if name_set != required_names and not required_names.issubset(name_set):
         fail("archive is missing the required Pages files")
     cname = archive.read("CNAME")
     if cname != b"storage.telecrypt.io\n":
         fail("archive has an unexpected CNAME")
+    if archive.read("_headers") != EXPECTED_HEADERS:
+        fail("archive has unexpected stage response headers")

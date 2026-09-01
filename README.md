@@ -33,15 +33,23 @@ remain bound to the Matrix device that owns the session.
 If session storage is unavailable, the UI fails closed and does not open an account. The only
 browser-persistent UI value is the non-secret OIDC client registration identifier.
 
-GitHub Pages deployment runs only from the exact-tag workflow after it creates and verifies an
-exact published, non-prerelease immutable GitHub Release. Repository administrators must enforce
-both immutable releases and protection against moving or deleting the release tag before starting
-the workflow; the Actions token cannot inspect those administrative settings and the workflow's
-source checks cannot make tag publication atomic. The workflow builds and tests the site, creates
-or resumes one exact draft Release, verifies its metadata and bytes, publishes it, then verifies
-the public download and deploys those exact immutable Release bytes without rebuilding. A rerun may
-reproduce the local package for comparison, but it never replaces a published asset. Any source or
-metadata change fails closed and requires a new version.
+The exact-tag workflow creates and verifies one exact published, non-prerelease immutable GitHub
+Release. Repository administrators must enforce both immutable releases and protection against
+moving or deleting the release tag before starting the workflow; the Actions token cannot inspect
+those administrative settings and the workflow's source checks cannot make tag publication atomic.
+The workflow builds and tests the site, creates or resumes one exact draft Release, verifies its
+metadata and bytes, publishes it, then verifies the public download and deploys those exact bytes to
+GitHub Pages production. A rerun may reproduce the local package for comparison, but it never
+replaces a published asset. Any source or metadata change fails closed and requires a new version.
+
+The Cloudflare Pages Git integration builds only the `stage` branch. That branch is advanced only to
+a commit that has already passed the repository checks and is identified by a published immutable
+`storage-web-v*` release; the Cloudflare deployment record must resolve to that same commit. A branch
+name alone is never sufficient deployment evidence. Cloudflare Pages stage must emit exactly one response
+`Content-Security-Policy` header containing the full site policy plus `frame-ancestors 'none'`, and
+exactly one `X-Frame-Options: DENY` header on every response. The checked-in `public/_headers` file
+records that contract; GitHub Pages production cannot emit response headers and continues to use
+the HTML meta policy as its browser baseline.
 
 GitHub Pages release publication is separate from authenticated acceptance. Authenticated acceptance
 remains blocked until the site is served behind a header-capable edge that adds
@@ -79,14 +87,13 @@ browser suite expects the shared disposable Synapse/MAS fixture to be running on
 Pushes and pull requests to `main` only verify the source. A protected annotated
 `storage-web-v<major>.<minor>.<patch>` tag runs the exact-version release workflow; it checks the
 tag/source/main/package identity, installs dependencies, runs tests/lint/typecheck/build, and
-creates the single immutable Release archive. Pages deploys only after the published Release is
-rechecked and its archive bytes match the Release API digest. Every correction therefore requires a
-new version.
-The Pages artifact is environment-neutral; the browser derives its backend from the canonical site
-hostname. VM activation, promotion, and authenticated acceptance follow
-the operator-managed Harness deployment contract; this repository does not publish or duplicate
-those private operational steps. A header-capable edge must provide the
-concrete CSP and X-Frame-Options requirements described above.
+creates the single immutable Release archive. GitHub Pages deployment occurs only after the
+published Release is rechecked and its archive bytes match the Release API digest. Cloudflare Pages
+stage builds the same released commit from `stage`, with previews disabled; its deployment record is
+accepted only when its source commit matches the immutable Release. The source is environment-neutral,
+and the browser derives its backend from the canonical site hostname. VM activation, promotion, and
+authenticated acceptance follow the operator-managed Harness deployment contract; this repository
+does not publish or duplicate those private operational steps.
 
 ## License
 

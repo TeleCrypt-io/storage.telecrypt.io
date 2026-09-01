@@ -10,6 +10,16 @@ const expectedProduction = new Map([
   ["connect-src", ["'self'", "https://backend.telecrypt.io", "https://backend.stage.telecrypt.io"]],
   ["form-action", ["'self'"]],
 ]);
+const expectedStage = new Map([
+  ...expectedProduction,
+  ["frame-ancestors", ["'none'"]],
+]);
+
+function serializePolicy(policy) {
+  return [...policy]
+    .map(([name, sources]) => `${name}${sources.length === 0 ? "" : ` ${sources.join(" ")}`}`)
+    .join("; ");
+}
 
 function parsePolicy(policy) {
   const directives = new Map();
@@ -38,6 +48,34 @@ const indexHtml = readFileSync("index.html", "utf8");
 const matches = [...indexHtml.matchAll(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"/giu)];
 if (matches.length !== 1) throw new Error("index.html must contain exactly one CSP meta policy");
 requireExactPolicy(parsePolicy(matches[0][1]), expectedProduction);
+
+const headerFile = readFileSync("public/_headers", "utf8");
+const headerLines = headerFile.split("\n");
+if (headerLines.at(-1) === "") headerLines.pop();
+if (headerLines.length !== 3 || headerLines[0] !== "/*") {
+  throw new Error("public/_headers must contain exactly one /* rule and two headers");
+}
+const headers = new Map();
+for (const line of headerLines.slice(1)) {
+  const match = line.match(/^ {2}([A-Za-z0-9-]+): ([^\r\n]*)$/u);
+  if (!match || headers.has(match[1])) {
+    throw new Error("public/_headers contains an invalid or duplicate header");
+  }
+  headers.set(match[1], match[2]);
+}
+const expectedHeaders = new Map([
+  ["Content-Security-Policy", serializePolicy(expectedStage)],
+  ["X-Frame-Options", "DENY"],
+]);
+if (headers.size !== expectedHeaders.size) {
+  throw new Error("public/_headers contains an unexpected header set");
+}
+for (const [name, value] of expectedHeaders) {
+  if (headers.get(name) !== value) {
+    throw new Error(`public/_headers differs from the exact stage contract: ${name}`);
+  }
+}
+requireExactPolicy(parsePolicy(headers.get("Content-Security-Policy")), expectedStage);
 
 const viteConfig = readFileSync("vite.config.ts", "utf8");
 for (const exact of [
