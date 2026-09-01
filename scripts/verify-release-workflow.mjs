@@ -8,7 +8,18 @@ const verify = readFileSync(".github/workflows/verify.yml", "utf8");
 const sharedUiRelease = readFileSync("scripts/verify-shared-ui-release.sh", "utf8");
 const archiveTests = readFileSync("scripts/test-validate-pages-archive.py", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
-if (readFileSync(".node-version", "utf8").trim() !== "22.23.2" || packageJson.packageManager !== "npm@10.9.8" || packageJson.engines?.node !== ">=22.23.2") throw new Error("Node/npm toolchain policy is not encoded exactly");
+const exactNodeVersion = "24.20.0";
+const exactNpmVersion = "11.19.0";
+const nodeVersion = readFileSync(".node-version", "utf8").trim();
+if (nodeVersion !== exactNodeVersion || packageJson.packageManager !== `npm@${exactNpmVersion}` || packageJson.engines?.node !== `>=${exactNodeVersion}`) throw new Error("Node/npm toolchain policy is not encoded exactly");
+for (const [name, text] of [["verify workflow", verify], ["release workflow", workflow]]) {
+  const nodeRuntimeCheck = [`test "$(node --version)" = v${exactNodeVersion}`, `test "$(node --version)" = "v${exactNodeVersion}"`];
+  const npmRuntimeCheck = [`test "$(npm --version)" = ${exactNpmVersion}`, `test "$(npm --version)" = "${exactNpmVersion}"`];
+  if (!text.includes(`node-version: "${exactNodeVersion}"`) || !nodeRuntimeCheck.some((fragment) => text.includes(fragment)) || !npmRuntimeCheck.some((fragment) => text.includes(fragment))) {
+    throw new Error(`${name} does not use the exact Node/npm pins`);
+  }
+}
+if ([workflow, verify].some((text) => text.includes("22.23.2") || text.includes("10.9.8"))) throw new Error("stale Node/npm pins remain in the workflows");
 
 function job(name) {
   const match = workflow.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|(?![\\s\\S]))`, "m"));
@@ -215,6 +226,12 @@ if ([workflow, verify, sharedUiRelease].some((text) => text.includes("--output")
 if (!releaseShell.includes("upload_url") || !releaseShell.includes("uploads.github.com") || !releaseShell.includes('"$upload_url?name=$asset_name"')) throw new Error("Release asset upload does not use the authoritative uploads.github.com URL");
 for (const fragment of ["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_PARAMETERS", "GH_HOST: github.com", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]) {
   if (!workflow.includes(fragment)) throw new Error(`transport hardening is missing ${fragment}`);
+}
+for (const [name, text] of [["verify workflow", verify], ["release workflow", workflow]]) {
+  for (const fragment of ['GIT_CONFIG_COUNT: "1"', "GIT_CONFIG_KEY_0: init.defaultBranch", "GIT_CONFIG_VALUE_0: main"]) {
+    if (!text.includes(fragment)) throw new Error(`${name} does not pin Git's default branch`);
+  }
+  if (text.includes('GIT_CONFIG_COUNT: "0"')) throw new Error(`${name} leaves Git's default branch implicit`);
 }
 if (releaseShell.indexOf("--method POST") > releaseShell.indexOf("--method DELETE") || releaseShell.indexOf("--method DELETE") > releaseShell.indexOf("--input \"$archive\"") || releaseShell.indexOf("--input \"$archive\"") > releaseShell.indexOf("--method PATCH")) throw new Error("draft lifecycle operations are out of order");
 if (workflow.includes("gh release create") || workflow.includes("release create") || workflow.includes("--draft")) throw new Error("one-shot Release recovery remains");

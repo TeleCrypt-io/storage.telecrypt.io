@@ -14,7 +14,9 @@ env:
   GIT_CONFIG_NOSYSTEM: "1"
   GIT_CONFIG_SYSTEM: /dev/null
   GIT_CONFIG_GLOBAL: /tmp/telecrypt-gitconfig
-  GIT_CONFIG_COUNT: "0"
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: init.defaultBranch
+  GIT_CONFIG_VALUE_0: main
   GIT_CONFIG_PARAMETERS: ""
   GIT_NO_REPLACE_OBJECTS: "1"
   GIT_TERMINAL_PROMPT: "0"
@@ -77,13 +79,13 @@ jobs:
           git merge-base --is-ancestor "$release_commit" refs/remotes/origin/main
           rm -rf "$d"
       - uses: actions/setup-node@v7.0.0
-        with: {node-version: "22.23.2", cache: npm}
+        with: {node-version: "24.20.0", cache: npm}
       - name: Verify exact versions and vendored provenance
         shell: bash
         run: |
           set -euo pipefail
-          test "$(node --version)" = v22.23.2
-          test "$(npm --version)" = 10.9.8
+          test "$(node --version)" = v24.20.0
+          test "$(npm --version)" = 11.19.0
           version="${RELEASE_TAG#storage-web-v}"
           test "$version" = "$(node -p 'require("./package.json").version')"
           test "$version" = "$(node -p 'JSON.parse(require("fs").readFileSync("package-lock.json","utf8")).packages[""].version')"
