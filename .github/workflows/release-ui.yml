@@ -265,7 +265,7 @@ jobs:
             bounded_gh "$json" api --hostname github.com --header 'X-GitHub-Api-Version: 2026-03-10' "/repos/$GITHUB_REPOSITORY/releases/$id"
             verify_draft "$json" "$id"
             test "$(jq -c '[.assets[] | {id,name,state,size,digest}] | sort_by(.name)' "$json")" = "$expected_draft_asset_metadata"
-            jq -e --arg name "storage-web-${RELEASE_TAG#storage-web-v}.pages.zip" --arg digest "$EXPECTED_DIGEST" --argjson size "$EXPECTED_SIZE" '((.assets|type)=="array" and (.assets|length)==1) and (.assets[0]|type=="object" and (.id|type=="number" and .id>0 and floor==.) and .name==$name and .state=="uploaded" and .size==$size and .digest==$digest)' "$json" >/dev/null
+            jq -e --arg name "storage-web-${RELEASE_TAG#storage-web-v}.pages.zip" --arg digest "$EXPECTED_DIGEST" --argjson size "$EXPECTED_SIZE" '((.assets|type)=="array" and (.assets|length)==1) and (.assets[0]|type=="object" and (.id|type=="number" and .>0 and floor==.) and .name==$name and .state=="uploaded" and .size==$size and .digest==$digest)' "$json" >/dev/null
           }
           verify_published() {
             local json="$1" id="$2"
