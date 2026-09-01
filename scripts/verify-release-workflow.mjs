@@ -227,6 +227,12 @@ if (!releaseShell.includes("upload_url") || !releaseShell.includes("uploads.gith
 for (const fragment of ["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_PARAMETERS", "GH_HOST: github.com", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]) {
   if (!workflow.includes(fragment)) throw new Error(`transport hardening is missing ${fragment}`);
 }
+for (const [name, text] of [["verify workflow", verify], ["release workflow", workflow]]) {
+  for (const fragment of ['GIT_CONFIG_COUNT: "1"', "GIT_CONFIG_KEY_0: init.defaultBranch", "GIT_CONFIG_VALUE_0: main"]) {
+    if (!text.includes(fragment)) throw new Error(`${name} does not pin Git's default branch`);
+  }
+  if (text.includes('GIT_CONFIG_COUNT: "0"')) throw new Error(`${name} leaves Git's default branch implicit`);
+}
 if (releaseShell.indexOf("--method POST") > releaseShell.indexOf("--method DELETE") || releaseShell.indexOf("--method DELETE") > releaseShell.indexOf("--input \"$archive\"") || releaseShell.indexOf("--input \"$archive\"") > releaseShell.indexOf("--method PATCH")) throw new Error("draft lifecycle operations are out of order");
 if (workflow.includes("gh release create") || workflow.includes("release create") || workflow.includes("--draft")) throw new Error("one-shot Release recovery remains");
 for (const fragment of ["releases?per_page=100&page=$page", "--jq '[.[] | {id,tag_name,draft}]'", "page_size", "test \"$page_size\" -le 100", "max_release_pages=100", "release-matches.jsonl", "match_count", "Release list completeness cannot be proven", "discovery_state", "jq -s -er"]) if (!releaseShell.includes(fragment)) throw new Error(`bounded Release discovery is missing ${fragment}`);
