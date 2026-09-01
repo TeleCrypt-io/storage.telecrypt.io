@@ -436,6 +436,29 @@ describe("login", () => {
     window.history.replaceState({}, "", "/");
   });
 
+  it("connects the callback session and renders the authenticated identity", async () => {
+    window.history.replaceState({}, "", "/?code=one&state=two");
+    sessionStorage.setItem(
+      session.OIDC_LOGIN_INTENT_STORAGE_KEY,
+      JSON.stringify({ state: "two", createdAt: Date.now() }),
+    );
+    const storage = fakeStorage();
+    vi.mocked(oidcAuth.completeOidcLoginFromCallback).mockResolvedValue(SESSION);
+    vi.mocked(core.discoverOidcIssuer).mockResolvedValue({
+      issuer: runtimeOidcIssuer(),
+      token_endpoint: `${getRuntimeSettings().homeserver}/auth/token`,
+    } as never);
+    vi.mocked(core.TeleCryptIOStorage.createFromOidc).mockResolvedValue(storage as never);
+    vi.mocked(core.listVaults).mockResolvedValue([]);
+
+    render(<App />);
+
+    expect(await screen.findByTestId("current-user")).toHaveTextContent(SESSION.userId);
+    expect(await screen.findByTestId("no-vaults")).toBeInTheDocument();
+    expect(oidcAuth.completeOidcLoginFromCallback).toHaveBeenCalledWith(expect.any(AbortSignal));
+    window.history.replaceState({}, "", "/");
+  });
+
   it("does not disrupt a saved session for a spurious callback without login intent", async () => {
     window.history.replaceState({}, "", "/?code=spurious&state=unknown");
     const { storage } = await loginAndReachVaults();
