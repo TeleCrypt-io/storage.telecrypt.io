@@ -20,6 +20,7 @@ vi.mock("../lib/core", async () => {
     downloadFile: vi.fn(),
     getFileDetails: vi.fn(),
     createSubfolder: vi.fn(),
+    deleteFile: vi.fn(),
     deleteFolder: vi.fn(),
   };
 });
@@ -221,6 +222,35 @@ describe("VaultContents mutation identity", () => {
       ),
     );
     expect(onFolderDeleted).not.toHaveBeenCalled();
+  });
+
+  it("removes a deleted file after the refreshed list excludes it", async () => {
+    let fileStillExists = true;
+    vi.mocked(core.listFiles).mockImplementation(async () =>
+      fileStillExists ? [{ id: "$file:localhost", name: "gone.txt" }] : [],
+    );
+    vi.mocked(core.listSubfolders).mockResolvedValue([]);
+    vi.mocked(core.deleteFile).mockImplementation(async () => {
+      fileStillExists = false;
+      return { id: "$file:localhost", deleted: true };
+    });
+    vi.stubGlobal("confirm", () => true);
+    const user = userEvent.setup();
+    renderContents("!vault-a:localhost", vi.fn<(folderId: string) => void>());
+
+    await waitFor(() => expect(screen.getByTestId("file-item")).toHaveTextContent("gone.txt"));
+    await user.click(screen.getByTestId("delete-file"));
+
+    await waitFor(() =>
+      expect(core.deleteFile).toHaveBeenCalledWith(
+        expect.anything(),
+        "!vault-a:localhost",
+        "$file:localhost",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByTestId("file-item")).not.toBeInTheDocument());
+    expect(screen.getByTestId("no-files")).toBeInTheDocument();
   });
 
   it("does not trigger a download after the contents unmount", async () => {
