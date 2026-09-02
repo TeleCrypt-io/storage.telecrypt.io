@@ -241,8 +241,8 @@ if (!releaseShell.includes("(.assets|length) <= 64") || !releaseShell.includes("
 if (!workflow.includes("concurrency:\n  group: pages-storage-web-")) throw new Error("Pages concurrency is missing");
 if (!release.includes("needs: build") && !workflow.includes("release:\n    needs: build")) throw new Error("Release does not depend on the tested build");
 if (!workflow.includes("needs: [build, release]")) throw new Error("Pages deployment is not downstream of publication");
-if (deploy.indexOf("actions/upload-pages-artifact@v5.0.0") < 0 || deploy.indexOf("actions/deploy-pages@v5.0.0") < 0) throw new Error("Pages ordering is not explicit");
-if (workflow.indexOf("actions/upload-pages-artifact@v5.0.0") > workflow.indexOf("actions/deploy-pages@v5.0.0")) throw new Error("Pages deployment precedes artifact upload");
+if (deploy.indexOf("actions/upload-pages-artifact@v5.0.0") < 0 || deploy.indexOf("actions/deploy-pages@v5.0.1") < 0) throw new Error("Pages ordering is not explicit");
+if (workflow.indexOf("actions/upload-pages-artifact@v5.0.0") > workflow.indexOf("actions/deploy-pages@v5.0.1")) throw new Error("Pages deployment precedes artifact upload");
 for (const fragment of ["validate-pages-archive.py", "pages_digest", "pages_size"]) if (!workflow.includes(fragment)) throw new Error(`Pages artifact contract is missing ${fragment}`);
 for (const line of workflow.split("\n").filter((line) => line.includes("gh api"))) if (!line.includes("--hostname github.com")) throw new Error(`GitHub API is not pinned: ${line}`);
 if (!packageShell.includes("bounded_package") || !packageShell.includes("package-pages.sh") || !packageShell.includes("validate-pages-archive.py")) throw new Error("Pages packaging commands are not bounded");
