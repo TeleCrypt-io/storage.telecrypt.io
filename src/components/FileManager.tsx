@@ -309,7 +309,9 @@ export function FileManager() {
       await withAccountSignal(accountSignal, () =>
         core.deleteVault(expectedStorage, vault.id, { signal: accountSignal ?? undefined }),
       );
-      if (!isCurrentStorage(expectedStorage, generation) || !core.isVaultOwner(expectedStorage, vault.id)) return;
+      // A successful delete changes the SDK's ownership projection immediately. Refresh based on
+      // the confirmed mutation result, not on the post-delete owner snapshot.
+      if (!isCurrentStorage(expectedStorage, generation)) return;
       if (rootVaultRef.current?.id === vault.id) {
         rootVaultRef.current = null;
         setRootVault(null);

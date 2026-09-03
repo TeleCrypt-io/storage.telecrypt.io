@@ -211,12 +211,16 @@ describe("FileManager refresh identity", () => {
     expect(core.listVaults).toHaveBeenCalledTimes(1);
   });
 
-  it("does not apply a pending delete completion after ownership is revoked", async () => {
+  it("refreshes after a confirmed delete even when the SDK no longer reports ownership", async () => {
     const storage = fakeStorage("shared");
     const deletion = deferred<{ id: string; deleted: true }>();
     let role = "owner";
+    let refreshCount = 0;
     vi.mocked(core.isVaultOwner).mockImplementation(() => role === "owner");
-    vi.mocked(core.listVaults).mockResolvedValue([{ id: "!vault:localhost", name: "Shared" }]);
+    vi.mocked(core.listVaults).mockImplementation(async () => {
+      refreshCount += 1;
+      return refreshCount === 1 ? [{ id: "!vault:localhost", name: "Shared" }] : [];
+    });
     vi.mocked(core.deleteVault).mockReturnValue(deletion.promise);
     useStorageMock.mockReturnValue({ storage } as never);
     const user = userEvent.setup();
@@ -230,8 +234,9 @@ describe("FileManager refresh identity", () => {
     deletion.resolve({ id: "!vault:localhost", deleted: true });
     await deleteTask;
 
-    expect(screen.getByText("Shared")).toBeInTheDocument();
-    expect(core.listVaults).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByTestId("no-vaults")).toBeInTheDocument());
+    expect(screen.queryByText("Shared")).not.toBeInTheDocument();
+    expect(core.listVaults).toHaveBeenCalledTimes(2);
   });
 
   it("clears owner controls when the vault refresh fails", async () => {
