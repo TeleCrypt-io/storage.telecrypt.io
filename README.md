@@ -1,7 +1,7 @@
 # storage.telecrypt.io
 
 The static React/Vite site served at [storage.telecrypt.io](https://storage.telecrypt.io).
-It consumes the exact published `@telecrypt-io/storage@0.5.25` browser library. The package lock
+It consumes the exact published `@telecrypt-io/storage@0.5.26` browser library. The package lock
 binds that dependency to the published tarball's integrity and the release workflows verify the
 immutable SDK release record and package bytes before dependency installation.
 Storage protocol, cryptography, and the command-line client deliberately live in their own
